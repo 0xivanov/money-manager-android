@@ -2,14 +2,18 @@ package org.moneymanager.data
 
 import java.io.IOException
 import java.net.HttpURLConnection
+import java.net.URLEncoder
 import java.net.URL
 import org.json.JSONArray
 import org.json.JSONObject
 import org.moneymanager.model.AuthResult
+import org.moneymanager.model.Category
 import org.moneymanager.model.Transaction
 import org.moneymanager.model.TransactionRequest
 import org.moneymanager.model.TransactionSummary
 import org.moneymanager.model.User
+
+class ApiException(val status: Int, message: String) : IOException(message)
 
 class ApiClient(private val baseUrl: String) {
     fun register(email: String, password: String): AuthResult =
@@ -30,14 +34,40 @@ class ApiClient(private val baseUrl: String) {
         category: String?,
     ): List<Transaction> {
         val query = buildList {
-            add("month=$month")
-            if (!type.isNullOrBlank()) add("type=$type")
-            if (!category.isNullOrBlank()) add("category=$category")
+            add("month=${month.queryEncoded()}")
+            if (!type.isNullOrBlank()) add("type=${type.queryEncoded()}")
+            if (!category.isNullOrBlank()) add("category=${category.queryEncoded()}")
         }.joinToString("&")
         val json = request("GET", "/transactions?$query", token = token)
         val array = JSONArray(json)
         return List(array.length()) { index -> parseTransaction(array.getJSONObject(index)) }
     }
+
+    fun getCategories(token: String, type: String): List<Category> {
+        val json = request("GET", "/categories?type=${type.queryEncoded()}", token = token)
+        val array = JSONArray(json)
+        return List(array.length()) { index -> parseCategory(array.getJSONObject(index)) }
+    }
+
+    fun createCategory(token: String, type: String, name: String): Category {
+        val body = JSONObject()
+            .put("type", type)
+            .put("name", name)
+            .toString()
+        val json = request("POST", "/categories", token = token, body = body)
+        return parseCategory(JSONObject(json))
+    }
+
+    fun deleteCategory(token: String, id: Int) {
+        request("DELETE", "/categories/$id", token = token)
+    }
+
+    fun exportTransactionsCsv(token: String, from: String, to: String): String =
+        request(
+            method = "GET",
+            path = "/transactions/export?from=${from.queryEncoded()}&to=${to.queryEncoded()}",
+            token = token,
+        )
 
     fun createTransaction(token: String, transaction: TransactionRequest): Transaction {
         val json = request(
@@ -103,7 +133,7 @@ class ApiClient(private val baseUrl: String) {
         connection.disconnect()
 
         if (status !in 200..299) {
-            throw IOException(response.ifBlank { "Request failed with HTTP $status" })
+            throw ApiException(status, response.errorMessage().ifBlank { "Request failed with HTTP $status" })
         }
         return response
     }
@@ -113,6 +143,7 @@ class ApiClient(private val baseUrl: String) {
             id = json.getInt("id"),
             type = json.getString("type"),
             category = json.getString("category"),
+            description = json.optString("description"),
             amount = json.getString("amount"),
             currency = json.getString("currency"),
             occurredAt = json.getString("occurred_at").dateOnly(),
@@ -128,13 +159,29 @@ class ApiClient(private val baseUrl: String) {
             transactionCount = json.getInt("transaction_count"),
         )
 
+    private fun parseCategory(json: JSONObject): Category =
+        Category(
+            id = json.getInt("id"),
+            type = json.getString("type"),
+            name = json.getString("name"),
+            isDefault = json.getBoolean("is_default"),
+        )
+
     private fun TransactionRequest.toJson(): JSONObject =
         JSONObject()
             .put("type", type)
             .put("category", category)
+            .put("description", description.trim())
             .put("amount", amount)
             .put("currency", currency)
             .put("occurred_at", occurredAt.dateOnly())
 
     private fun String.dateOnly(): String = take(10)
+
+    private fun String.queryEncoded(): String = URLEncoder.encode(this, Charsets.UTF_8.name())
+
+    private fun String.errorMessage(): String =
+        runCatching { JSONObject(this).optString("error") }
+            .getOrDefault(this)
+            .ifBlank { this }
 }

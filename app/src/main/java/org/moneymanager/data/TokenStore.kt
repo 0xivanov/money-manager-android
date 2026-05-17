@@ -17,15 +17,24 @@ class TokenStore(context: Context) {
 
     fun getToken(): String? = preferences.getString(KEY_TOKEN, null)
 
-    fun saveToken(token: String) {
-        preferences.edit().putString(KEY_TOKEN, token).apply()
+    fun getEmail(): String = preferences.getString(KEY_EMAIL, "").orEmpty()
+
+    fun saveSession(token: String, email: String) {
+        preferences.edit()
+            .putString(KEY_TOKEN, token)
+            .putString(KEY_EMAIL, email)
+            .apply()
     }
 
     fun clearToken() {
-        preferences.edit().remove(KEY_TOKEN).apply()
+        preferences.edit()
+            .remove(KEY_TOKEN)
+            .remove(KEY_EMAIL)
+            .apply()
     }
 
     private companion object {
         const val KEY_TOKEN = "jwt"
+        const val KEY_EMAIL = "email"
     }
 }

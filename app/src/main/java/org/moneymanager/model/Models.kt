@@ -14,6 +14,7 @@ data class Transaction(
     val id: Int,
     val type: String,
     val category: String,
+    val description: String,
     val amount: String,
     val currency: String,
     val occurredAt: String,
@@ -22,9 +23,17 @@ data class Transaction(
 data class TransactionRequest(
     val type: String,
     val category: String,
+    val description: String = "",
     val amount: String,
     val currency: String = "EUR",
     val occurredAt: String,
+)
+
+data class Category(
+    val id: Int,
+    val type: String,
+    val name: String,
+    val isDefault: Boolean,
 )
 
 data class TransactionSummary(
