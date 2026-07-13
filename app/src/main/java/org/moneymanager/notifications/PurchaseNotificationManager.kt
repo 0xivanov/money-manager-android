@@ -18,8 +18,6 @@ class PurchaseNotificationManager(private val context: Context) {
         context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
     fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-
         val channel = NotificationChannel(
             CHANNEL_ID,
             "Purchase reminders",

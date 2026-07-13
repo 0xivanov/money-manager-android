@@ -4,7 +4,14 @@ import android.content.Context
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
-class TokenStore(context: Context) {
+interface SessionStore {
+    fun getToken(): String?
+    fun getEmail(): String
+    fun saveSession(token: String, email: String)
+    fun clearToken()
+}
+
+class TokenStore(context: Context) : SessionStore {
     private val preferences = EncryptedSharedPreferences.create(
         context,
         "money_manager_secure",
@@ -15,18 +22,18 @@ class TokenStore(context: Context) {
         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
     )
 
-    fun getToken(): String? = preferences.getString(KEY_TOKEN, null)
+    override fun getToken(): String? = preferences.getString(KEY_TOKEN, null)
 
-    fun getEmail(): String = preferences.getString(KEY_EMAIL, "").orEmpty()
+    override fun getEmail(): String = preferences.getString(KEY_EMAIL, "").orEmpty()
 
-    fun saveSession(token: String, email: String) {
+    override fun saveSession(token: String, email: String) {
         preferences.edit()
             .putString(KEY_TOKEN, token)
             .putString(KEY_EMAIL, email)
             .apply()
     }
 
-    fun clearToken() {
+    override fun clearToken() {
         preferences.edit()
             .remove(KEY_TOKEN)
             .remove(KEY_EMAIL)

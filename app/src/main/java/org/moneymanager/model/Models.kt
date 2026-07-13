@@ -45,6 +45,12 @@ data class TransactionSummary(
     val transactionCount: Int,
 )
 
+data class ImportResult(
+    val imported: Int,
+    val skipped: Int,
+    val ignored: Int,
+)
+
 val expenseCategories = listOf(
     "food",
     "transport",
