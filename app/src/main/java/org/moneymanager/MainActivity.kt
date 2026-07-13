@@ -6,7 +6,9 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -17,7 +19,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import java.io.File
 import org.moneymanager.data.ApiClient
 import org.moneymanager.data.TokenStore
-import org.moneymanager.notifications.ACTION_TRACK_PURCHASE
 import org.moneymanager.notifications.PurchaseNotificationManager
 import org.moneymanager.signals.FakePurchaseSignalSource
 
@@ -25,21 +26,41 @@ class MainActivity : ComponentActivity() {
     private lateinit var purchaseNotificationManager: PurchaseNotificationManager
     private val fakePurchaseSignalSource = FakePurchaseSignalSource()
     private var pendingTrackPurchase by mutableStateOf(false)
+    private var notificationsEnabled by mutableStateOf(false)
+    private var simulateAfterPermission = false
     private val notificationPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            notificationsEnabled = granted
+            if (granted && simulateAfterPermission) {
+                fakePurchaseSignalSource.simulatePurchaseSignal()
+            }
+            simulateAfterPermission = false
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.auto(
+                android.graphics.Color.TRANSPARENT,
+                android.graphics.Color.TRANSPARENT,
+            ),
+            navigationBarStyle = SystemBarStyle.auto(
+                android.graphics.Color.TRANSPARENT,
+                android.graphics.Color.TRANSPARENT,
+            ),
+        )
         super.onCreate(savedInstanceState)
 
         val tokenStore = TokenStore(this)
         val apiClient = ApiClient(BuildConfig.API_BASE_URL)
-        purchaseNotificationManager = PurchaseNotificationManager(this).also {
-            it.createNotificationChannel()
+        if (BuildConfig.DEBUG) {
+            purchaseNotificationManager = PurchaseNotificationManager(this).also {
+                it.createNotificationChannel()
+            }
+            fakePurchaseSignalSource.start {
+                purchaseNotificationManager.showPurchaseDetectedNotification()
+            }
+            notificationsEnabled = canPostNotifications()
         }
-        fakePurchaseSignalSource.start {
-            purchaseNotificationManager.showPurchaseDetectedNotification()
-        }
-        requestNotificationPermissionIfNeeded()
         pendingTrackPurchase = isTrackPurchaseIntent(intent)
 
         setContent {
@@ -54,7 +75,9 @@ class MainActivity : ComponentActivity() {
                 pendingTrackPurchase = pendingTrackPurchase,
                 onTrackPurchaseHandled = { pendingTrackPurchase = false },
                 onExportCsv = ::shareCsvFile,
-                onSimulatePurchaseSignal = fakePurchaseSignalSource::simulatePurchaseSignal,
+                notificationsEnabled = notificationsEnabled,
+                onEnableNotifications = { requestNotificationPermissionIfNeeded(false) },
+                onSimulatePurchaseSignal = ::simulatePurchaseSignal,
             )
         }
     }
@@ -68,12 +91,21 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        fakePurchaseSignalSource.stop()
+        if (BuildConfig.DEBUG) fakePurchaseSignalSource.stop()
         super.onDestroy()
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (BuildConfig.DEBUG) notificationsEnabled = canPostNotifications()
+    }
+
     private fun shareCsvFile(fileName: String, csv: String) {
-        val file = File(cacheDir, fileName)
+        val exportDirectory = File(cacheDir, "exports").apply { mkdirs() }
+        exportDirectory.listFiles()
+            ?.filter { it.extension.equals("csv", ignoreCase = true) }
+            ?.forEach(File::delete)
+        val file = File(exportDirectory, fileName)
         file.writeText(csv)
         val uri = FileProvider.getUriForFile(this, "${BuildConfig.APPLICATION_ID}.fileprovider", file)
         val intent = Intent(Intent.ACTION_SEND).apply {
@@ -85,14 +117,30 @@ class MainActivity : ComponentActivity() {
         startActivity(Intent.createChooser(intent, "Export transactions"))
     }
 
-    private fun requestNotificationPermissionIfNeeded() {
+    private fun requestNotificationPermissionIfNeeded(simulateWhenGranted: Boolean) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
+            simulateAfterPermission = simulateWhenGranted
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            notificationsEnabled = true
+            if (simulateWhenGranted) fakePurchaseSignalSource.simulatePurchaseSignal()
         }
     }
 
+    private fun simulatePurchaseSignal() {
+        requestNotificationPermissionIfNeeded(simulateWhenGranted = true)
+    }
+
+    private fun canPostNotifications(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
     private fun isTrackPurchaseIntent(intent: Intent?): Boolean =
         intent?.action == ACTION_TRACK_PURCHASE
+
+    private companion object {
+        const val ACTION_TRACK_PURCHASE = "org.moneymanager.action.TRACK_PURCHASE"
+    }
 }

@@ -54,7 +54,7 @@ The Android emulator uses `10.0.2.2` to reach the host machine, so the app defau
 http://10.0.2.2:8080
 ```
 
-That value is configured in `app/build.gradle.kts` as `moneyManagerApiBaseUrl`.
+That value is configured in `app/build.gradle.kts` as `moneyManagerDebugApiBaseUrl`.
 
 ## Open In Android Studio
 
@@ -122,7 +122,7 @@ ipconfig getifaddr en0
 Build with:
 
 ```sh
-./gradlew :app:assembleDebug -PmoneyManagerApiBaseUrl=http://YOUR_MACHINE_IP:8080
+./gradlew :app:assembleDebug -PmoneyManagerDebugApiBaseUrl=http://YOUR_MACHINE_IP:8080
 ```
 
 Both the phone and computer must be on the same network. Your firewall must allow inbound traffic to port `8080`.

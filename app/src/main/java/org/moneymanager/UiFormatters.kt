@@ -20,18 +20,24 @@ import androidx.compose.material.icons.filled.Work
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.runtime.Composable
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.text.NumberFormat
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Currency
+import java.util.Locale
 import kotlin.math.atan2
 import org.moneymanager.model.Transaction
 
 fun tabLabel(tab: AppTab): String =
     when (tab) {
-        AppTab.Dashboard -> "Dashboard"
-        AppTab.Transactions -> "Transactions"
+        AppTab.Dashboard -> "Home"
+        AppTab.Transactions -> "Activity"
+        AppTab.Investments -> "Invest"
         AppTab.Profile -> "Profile"
     }
 
@@ -39,6 +45,7 @@ fun tabIcon(tab: AppTab): ImageVector =
     when (tab) {
         AppTab.Dashboard -> Icons.Filled.Home
         AppTab.Transactions -> Icons.Filled.Receipt
+        AppTab.Investments -> Icons.AutoMirrored.Filled.TrendingUp
         AppTab.Profile -> Icons.Filled.Person
     }
 
@@ -51,23 +58,82 @@ fun transactionEditorTitle(state: MoneyManagerUiState): String =
 
 fun Transaction.signedAmount(): String {
     val prefix = if (type == "income") "+" else "-"
-    return amount.toMoneyAmount().money(prefix)
+    return prefix + BigDecimal(amount).abs().money(currency)
 }
 
-fun BigDecimal.signedMoney(): String {
+fun BigDecimal.signedMoney(currencyCode: String = "EUR"): String {
     val sign = if (this >= BigDecimal.ZERO) "+" else "-"
-    return abs().money(sign)
+    return sign + abs().money(currencyCode)
 }
 
-fun BigDecimal.money(prefix: String = ""): String = "$prefix€${formatMoney()}"
+fun BigDecimal.money(currencyCode: String = "EUR", locale: Locale = Locale.getDefault()): String {
+    val formatter = NumberFormat.getCurrencyInstance(locale).apply {
+        currency = runCatching { Currency.getInstance(currencyCode) }.getOrDefault(Currency.getInstance("EUR"))
+        minimumFractionDigits = 2
+        maximumFractionDigits = 2
+    }
+    return formatter.format(setScale(2, RoundingMode.HALF_UP))
+}
 
-fun BigDecimal.formatMoney(): String = setScale(2, RoundingMode.HALF_UP).toPlainString()
+fun BigDecimal.formatMoney(locale: Locale = Locale.getDefault()): String =
+    NumberFormat.getNumberInstance(locale).apply {
+        minimumFractionDigits = 2
+        maximumFractionDigits = 2
+    }.format(setScale(2, RoundingMode.HALF_UP))
+
+fun currencySymbol(currencyCode: String, locale: Locale = Locale.getDefault()): String =
+    runCatching { Currency.getInstance(currencyCode).getSymbol(locale) }.getOrDefault(currencyCode)
 
 fun List<CategoryTotal>.sumOfMoney(): BigDecimal =
     fold(BigDecimal.ZERO) { total, item -> total + item.amount }
 
-fun String.toMoneyAmount(): BigDecimal = runCatching { BigDecimal(this) }.getOrDefault(BigDecimal.ZERO)
+fun parseLocalizedDecimal(value: String, locale: Locale = Locale.getDefault()): BigDecimal? {
+    val raw = value.trim().filterNot { it.isWhitespace() || it == '\u00A0' }
+    if (raw.isBlank()) return null
+    val symbols = java.text.DecimalFormatSymbols.getInstance(locale)
+    val localeDecimalSeparator = symbols.decimalSeparator
+    val groupingSeparator = symbols.groupingSeparator
+    val fallbackSeparator = if (localeDecimalSeparator == ',') '.' else ','
 
+    val decimalSeparator = when {
+        localeDecimalSeparator in raw -> localeDecimalSeparator
+        groupingSeparator in raw && normalizeLocalizedWhole(raw, groupingSeparator) != null -> {
+            return normalizeLocalizedWhole(raw, groupingSeparator)?.toBigDecimalOrNull()
+        }
+        groupingSeparator in raw && groupingSeparator in charArrayOf('.', ',') -> groupingSeparator
+        fallbackSeparator in raw -> fallbackSeparator
+        else -> null
+    }
+
+    if (decimalSeparator == null) {
+        return normalizeLocalizedWhole(raw, groupingSeparator)?.toBigDecimalOrNull()
+    }
+    if (raw.count { it == decimalSeparator } > 1) return null
+
+    val parts = raw.split(decimalSeparator, limit = 2)
+    val whole = normalizeLocalizedWhole(parts[0], groupingSeparator) ?: return null
+    val fraction = parts.getOrNull(1)
+    if (fraction != null && (fraction.isEmpty() || !fraction.all(Char::isDigit))) return null
+    val normalized = if (fraction == null) whole else "$whole.$fraction"
+    return normalized.toBigDecimalOrNull()
+}
+
+private fun normalizeLocalizedWhole(value: String, groupingSeparator: Char): String? {
+    if (groupingSeparator !in value) {
+        return when {
+            value.isEmpty() -> "0"
+            value.all(Char::isDigit) -> value
+            else -> null
+        }
+    }
+    val groups = value.split(groupingSeparator)
+    val first = groups.firstOrNull() ?: return null
+    if (first.length !in 1..3 || first.any { !it.isDigit() }) return null
+    if (groups.drop(1).any { it.length != 3 || it.any { character -> !character.isDigit() } }) return null
+    return groups.joinToString("")
+}
+
+@Composable
 fun amountColor(amount: BigDecimal): Color =
     when {
         amount > BigDecimal.ZERO -> incomeColor
@@ -119,23 +185,24 @@ fun categoryIcon(category: String): ImageVector =
 fun dayTitle(date: LocalDate): String =
     when (date) {
         LocalDate.now() -> "Today"
-        else -> date.format(DateTimeFormatter.ofPattern("EEEE, MMM d"))
+        else -> date.format(DateTimeFormatter.ofPattern("EEEE, MMM d", Locale.getDefault()))
     }
 
 fun formatMonth(month: String): String =
     runCatching {
-        YearMonth.parse(month).format(DateTimeFormatter.ofPattern("MMMM yyyy"))
+        YearMonth.parse(month).format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault()))
     }.getOrDefault(month)
 
 fun String.toDisplayDate(): String =
     runCatching {
-        LocalDate.parse(take(10)).format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))
+        LocalDate.parse(take(10)).format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
     }.getOrDefault(this)
 
 fun String.displayDateToIso(): String {
     val trimmed = trim()
     return runCatching {
-        LocalDate.parse(trimmed, DateTimeFormatter.ofPattern("dd.MM.yyyy")).format(DateTimeFormatter.ISO_LOCAL_DATE)
+        LocalDate.parse(trimmed, DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
+            .format(DateTimeFormatter.ISO_LOCAL_DATE)
     }.getOrElse { trimmed }
 }
 
@@ -151,7 +218,9 @@ fun findPieCategoryForTap(
     val dx = offset.x - centerX
     val dy = offset.y - centerY
     val radius = minOf(width, height) / 2f
-    if ((dx * dx) + (dy * dy) > radius * radius) return null
+    val distanceSquared = (dx * dx) + (dy * dy)
+    val innerRadius = radius * 0.62f
+    if (distanceSquared > radius * radius || distanceSquared < innerRadius * innerRadius) return null
 
     val angle = (Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())) + 90.0 + 360.0) % 360.0
     val total = totals.sumOfMoney()

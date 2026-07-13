@@ -8,6 +8,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.moneymanager.model.AuthResult
 import org.moneymanager.model.Category
+import org.moneymanager.model.ImportResult
 import org.moneymanager.model.Transaction
 import org.moneymanager.model.TransactionRequest
 import org.moneymanager.model.TransactionSummary
@@ -15,19 +16,38 @@ import org.moneymanager.model.User
 
 class ApiException(val status: Int, message: String) : IOException(message)
 
-class ApiClient(private val baseUrl: String) {
-    fun register(email: String, password: String): AuthResult =
+interface MoneyManagerApi {
+    fun checkHealth(): Boolean
+    fun register(email: String, password: String): AuthResult
+    fun login(email: String, password: String): AuthResult
+    fun getSummary(token: String, month: String): TransactionSummary
+    fun getTransactions(token: String, month: String, type: String?, category: String?): List<Transaction>
+    fun getCategories(token: String, type: String): List<Category>
+    fun createCategory(token: String, type: String, name: String): Category
+    fun deleteCategory(token: String, id: Int)
+    fun exportTransactionsCsv(token: String, from: String, to: String): String
+    fun importRevolutCsv(token: String, contents: ByteArray): ImportResult
+    fun createTransaction(token: String, transaction: TransactionRequest): Transaction
+    fun updateTransaction(token: String, id: Int, transaction: TransactionRequest): Transaction
+    fun deleteTransaction(token: String, id: Int)
+    fun deleteAccount(token: String)
+}
+
+class ApiClient(private val baseUrl: String) : MoneyManagerApi {
+    override fun checkHealth(): Boolean = request("GET", "/health").trim() == "ok"
+
+    override fun register(email: String, password: String): AuthResult =
         auth("/auth/register", email, password)
 
-    fun login(email: String, password: String): AuthResult =
+    override fun login(email: String, password: String): AuthResult =
         auth("/auth/login", email, password)
 
-    fun getSummary(token: String, month: String): TransactionSummary {
-        val json = request("GET", "/transactions/summary?month=$month", token = token)
+    override fun getSummary(token: String, month: String): TransactionSummary {
+        val json = request("GET", "/transactions/summary?month=${month.queryEncoded()}", token = token)
         return parseSummary(JSONObject(json))
     }
 
-    fun getTransactions(
+    override fun getTransactions(
         token: String,
         month: String,
         type: String?,
@@ -43,13 +63,13 @@ class ApiClient(private val baseUrl: String) {
         return List(array.length()) { index -> parseTransaction(array.getJSONObject(index)) }
     }
 
-    fun getCategories(token: String, type: String): List<Category> {
+    override fun getCategories(token: String, type: String): List<Category> {
         val json = request("GET", "/categories?type=${type.queryEncoded()}", token = token)
         val array = JSONArray(json)
         return List(array.length()) { index -> parseCategory(array.getJSONObject(index)) }
     }
 
-    fun createCategory(token: String, type: String, name: String): Category {
+    override fun createCategory(token: String, type: String, name: String): Category {
         val body = JSONObject()
             .put("type", type)
             .put("name", name)
@@ -58,18 +78,24 @@ class ApiClient(private val baseUrl: String) {
         return parseCategory(JSONObject(json))
     }
 
-    fun deleteCategory(token: String, id: Int) {
+    override fun deleteCategory(token: String, id: Int) {
         request("DELETE", "/categories/$id", token = token)
     }
 
-    fun exportTransactionsCsv(token: String, from: String, to: String): String =
+    override fun exportTransactionsCsv(token: String, from: String, to: String): String =
         request(
             method = "GET",
             path = "/transactions/export?from=${from.queryEncoded()}&to=${to.queryEncoded()}",
             token = token,
         )
 
-    fun createTransaction(token: String, transaction: TransactionRequest): Transaction {
+    override fun importRevolutCsv(token: String, contents: ByteArray): ImportResult {
+        val json = requestBytes("POST", "/transactions/import/revolut", token, contents, "text/csv")
+        val result = JSONObject(json)
+        return ImportResult(result.getInt("imported"), result.getInt("skipped"), result.getInt("ignored"))
+    }
+
+    override fun createTransaction(token: String, transaction: TransactionRequest): Transaction {
         val json = request(
             method = "POST",
             path = "/transactions",
@@ -79,7 +105,7 @@ class ApiClient(private val baseUrl: String) {
         return parseTransaction(JSONObject(json))
     }
 
-    fun updateTransaction(token: String, id: Int, transaction: TransactionRequest): Transaction {
+    override fun updateTransaction(token: String, id: Int, transaction: TransactionRequest): Transaction {
         val json = request(
             method = "PUT",
             path = "/transactions/$id",
@@ -89,8 +115,12 @@ class ApiClient(private val baseUrl: String) {
         return parseTransaction(JSONObject(json))
     }
 
-    fun deleteTransaction(token: String, id: Int) {
+    override fun deleteTransaction(token: String, id: Int) {
         request("DELETE", "/transactions/$id", token = token)
+    }
+
+    override fun deleteAccount(token: String) {
+        request("DELETE", "/me", token = token)
     }
 
     private fun auth(path: String, email: String, password: String): AuthResult {
@@ -114,28 +144,30 @@ class ApiClient(private val baseUrl: String) {
         body: String? = null,
     ): String {
         val connection = (URL(baseUrl.trimEnd('/') + path).openConnection() as HttpURLConnection)
-        connection.requestMethod = method
-        connection.connectTimeout = 10_000
-        connection.readTimeout = 10_000
-        connection.setRequestProperty("Accept", "application/json")
-        if (token != null) {
-            connection.setRequestProperty("Authorization", "Bearer $token")
-        }
-        if (body != null) {
-            connection.doOutput = true
-            connection.setRequestProperty("Content-Type", "application/json")
-            connection.outputStream.use { it.write(body.toByteArray()) }
-        }
+        try {
+            connection.requestMethod = method
+            connection.connectTimeout = 10_000
+            connection.readTimeout = 10_000
+            connection.setRequestProperty("Accept", "application/json")
+            if (token != null) {
+                connection.setRequestProperty("Authorization", "Bearer $token")
+            }
+            if (body != null) {
+                connection.doOutput = true
+                connection.setRequestProperty("Content-Type", "application/json")
+                connection.outputStream.use { it.write(body.toByteArray()) }
+            }
 
-        val status = connection.responseCode
-        val stream = if (status in 200..299) connection.inputStream else connection.errorStream
-        val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-        connection.disconnect()
-
-        if (status !in 200..299) {
-            throw ApiException(status, response.errorMessage().ifBlank { "Request failed with HTTP $status" })
+            val status = connection.responseCode
+            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+            val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (status !in 200..299) {
+                throw ApiException(status, response.errorMessage().ifBlank { "Request failed with HTTP $status" })
+            }
+            return response
+        } finally {
+            connection.disconnect()
         }
-        return response
     }
 
     private fun parseTransaction(json: JSONObject): Transaction =
@@ -144,17 +176,46 @@ class ApiClient(private val baseUrl: String) {
             type = json.getString("type"),
             category = json.getString("category"),
             description = json.optString("description"),
-            amount = json.getString("amount"),
+            amount = json.getString("amount").also(String::toBigDecimal),
             currency = json.getString("currency"),
             occurredAt = json.getString("occurred_at").dateOnly(),
         )
 
+    private fun requestBytes(
+        method: String,
+        path: String,
+        token: String,
+        body: ByteArray,
+        contentType: String,
+    ): String {
+        val connection = (URL(baseUrl.trimEnd('/') + path).openConnection() as HttpURLConnection)
+        try {
+            connection.requestMethod = method
+            connection.connectTimeout = 10_000
+            connection.readTimeout = 30_000
+            connection.doOutput = true
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Authorization", "Bearer $token")
+            connection.setRequestProperty("Content-Type", contentType)
+            connection.outputStream.use { it.write(body) }
+            val status = connection.responseCode
+            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+            val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (status !in 200..299) {
+                throw ApiException(status, response.errorMessage().ifBlank { "Request failed with HTTP $status" })
+            }
+            return response
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private fun parseSummary(json: JSONObject): TransactionSummary =
         TransactionSummary(
             month = json.getString("month"),
-            income = json.getString("income"),
-            expense = json.getString("expense"),
-            balance = json.getString("balance"),
+            income = json.getString("income").also(String::toBigDecimal),
+            expense = json.getString("expense").also(String::toBigDecimal),
+            balance = json.getString("balance").also(String::toBigDecimal),
             currency = json.getString("currency"),
             transactionCount = json.getInt("transaction_count"),
         )
