@@ -42,236 +42,6 @@ import org.moneymanager.model.TransactionSchedule
 import org.moneymanager.model.TransactionScheduleRequest
 import org.moneymanager.model.TransactionSummary
 
-data class CategoryTotal(
-    val category: String,
-    val amount: BigDecimal,
-)
-
-data class DayBucket(
-    val date: LocalDate,
-    val balanceChange: BigDecimal,
-    val transactions: List<Transaction>,
-)
-
-data class MonthSnapshot(
-    val summary: TransactionSummary,
-    val transactions: List<Transaction>,
-)
-
-enum class AppTab {
-    Dashboard,
-    Transactions,
-    Investments,
-    Profile,
-}
-
-enum class MonthLoadPhase {
-    Idle,
-    Loading,
-    Refreshing,
-    Content,
-    Failure,
-}
-
-enum class ConnectionStatus {
-    Checking,
-    Connected,
-    Offline,
-}
-
-enum class GrowthDestination {
-    Schedules,
-    Budgets,
-    Notifications,
-}
-
-data class GrowthUiState(
-    val schedules: List<TransactionSchedule> = emptyList(),
-    val budgets: List<Budget> = emptyList(),
-    val notificationPreferences: NotificationPreferences? = null,
-    val portfolio: InvestmentPortfolio? = null,
-    val trades: List<InvestmentTrade> = emptyList(),
-    val investmentSchedules: List<InvestmentSchedule> = emptyList(),
-    val isPlanningLoading: Boolean = false,
-    val isInvestmentsLoading: Boolean = false,
-    val isMutating: Boolean = false,
-    val error: String? = null,
-    val investmentExportCsv: String? = null,
-    val investmentExportFileName: String? = null,
-)
-
-data class MoneyManagerUiState(
-    val token: String? = null,
-    val email: String = "",
-    val signedInEmail: String = "",
-    val password: String = "",
-    val confirmPassword: String = "",
-    val selectedTab: AppTab = AppTab.Dashboard,
-    val isRegisterMode: Boolean = false,
-    val isAuthLoading: Boolean = false,
-    val authError: String? = null,
-    val month: String = YearMonth.now().format(monthFormatter),
-    val loadedMonth: String? = null,
-    val monthLoadPhase: MonthLoadPhase = MonthLoadPhase.Idle,
-    val monthError: String? = null,
-    val summary: TransactionSummary? = null,
-    val transactions: List<Transaction> = emptyList(),
-    val filterType: String? = null,
-    val filterCategory: String? = null,
-    val searchQuery: String = "",
-    val selectedExpenseCategory: String? = null,
-    val isTransactionFormOpen: Boolean = false,
-    val editingId: Int? = null,
-    val formType: String = "expense",
-    val formCategory: String = "food",
-    val formAmount: String = "",
-    val formCurrency: String = "EUR",
-    val formDescription: String = "",
-    val formOccurredAt: String = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE),
-    val formBaseline: String = "",
-    val formError: String? = null,
-    val isFormSaving: Boolean = false,
-    val isTransactionMutating: Boolean = false,
-    val isCategoryPickerOpen: Boolean = false,
-    val expenseCategories: List<Category> = emptyList(),
-    val incomeCategories: List<Category> = emptyList(),
-    val newCategoryName: String = "",
-    val categoryError: String? = null,
-    val isCategoryMutating: Boolean = false,
-    val isExportDialogOpen: Boolean = false,
-    val exportFrom: String = LocalDate.now().withDayOfMonth(1).format(DateTimeFormatter.ISO_LOCAL_DATE),
-    val exportTo: String = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE),
-    val exportCsvContent: String? = null,
-    val exportFileName: String? = null,
-    val exportError: String? = null,
-    val isExporting: Boolean = false,
-    val isImporting: Boolean = false,
-    val importMessage: String? = null,
-    val profileError: String? = null,
-    val isAccountDeleting: Boolean = false,
-    val connectionStatus: ConnectionStatus = ConnectionStatus.Checking,
-    val connectionMessage: String? = null,
-    val growthDestination: GrowthDestination? = null,
-    val growth: GrowthUiState = GrowthUiState(),
-) {
-    val hasMonthContent: Boolean
-        get() = loadedMonth == month && summary != null
-
-    val isMonthLoading: Boolean
-        get() = monthLoadPhase == MonthLoadPhase.Loading
-
-    val isMonthRefreshing: Boolean
-        get() = monthLoadPhase == MonthLoadPhase.Refreshing
-
-    val currentCurrency: String
-        get() = if (hasMonthContent) summary?.currency ?: formCurrency else formCurrency
-
-    val expenseCategoryTotals: List<CategoryTotal>
-        get() = if (!hasMonthContent) {
-            emptyList()
-        } else {
-            transactions
-                .filter { it.type == "expense" }
-                .groupBy { it.category }
-                .map { (category, transactions) ->
-                    CategoryTotal(
-                        category = category,
-                        amount = transactions.sumAmounts(),
-                    )
-                }
-                .filter { it.amount > BigDecimal.ZERO }
-                .sortedByDescending { it.amount }
-        }
-
-    val dayBuckets: List<DayBucket>
-        get() = makeDayBuckets(filteredTransactions)
-
-    val dashboardDayBuckets: List<DayBucket>
-        get() = makeDayBuckets(dashboardTransactions)
-
-    private fun makeDayBuckets(source: List<Transaction>): List<DayBucket> =
-        source
-            .groupBy { it.occurredAt.toLocalDateOrNull() ?: LocalDate.MIN }
-            .map { (date, transactions) ->
-                val sortedTransactions = transactions.sortedByDescending { it.occurredAt }
-                DayBucket(
-                    date = date,
-                    balanceChange = sortedTransactions.fold(BigDecimal.ZERO) { total, transaction ->
-                        if (transaction.type == "income") {
-                            total + transaction.amount.toMoney()
-                        } else {
-                            total - transaction.amount.toMoney()
-                        }
-                    },
-                    transactions = sortedTransactions,
-                )
-            }
-            .sortedByDescending { it.date }
-
-    val canGoNextMonth: Boolean
-        get() = runCatching { YearMonth.parse(month).isBefore(YearMonth.now()) }.getOrDefault(false)
-
-    val hasActiveTransactionFilters: Boolean
-        get() = filterType != null || filterCategory != null || searchQuery.isNotBlank()
-
-    val availableFilterCategories: List<String>
-        get() = (transactions.map { it.category } + expenseCategories.map { it.name } + incomeCategories.map { it.name })
-            .distinct()
-            .sortedBy(::categoryTitle)
-
-    val formCategoryOptions: List<Category>
-        get() {
-            val categories = if (formType == "income") incomeCategories else expenseCategories
-            return if (formCategory.isBlank() || categories.any { it.name == formCategory }) {
-                categories
-            } else {
-                categories + Category(id = 0, type = formType, name = formCategory, isDefault = false)
-            }
-        }
-
-    val isFormValid: Boolean
-        get() = parseLocalizedDecimal(formAmount)?.let { it > BigDecimal.ZERO && it.scale() <= 2 } == true &&
-            formCategory.isNotBlank() &&
-            formOccurredAt.toLocalDateOrNull() != null &&
-            formDescription.length <= MAX_DESCRIPTION_LENGTH
-
-    val hasUnsavedFormChanges: Boolean
-        get() = isTransactionFormOpen && formFingerprint() != formBaseline
-
-    private val filteredTransactions: List<Transaction>
-        get() {
-            if (!hasMonthContent) return emptyList()
-            var result = transactions
-            filterType?.let { type -> result = result.filter { it.type == type } }
-            filterCategory?.let { category -> result = result.filter { it.category == category } }
-            val query = searchQuery.trim()
-            if (query.isNotBlank()) {
-                result = result.filter {
-                    it.description.contains(query, ignoreCase = true) ||
-                        it.category.contains(query, ignoreCase = true) ||
-                        it.amount.contains(query)
-                }
-            }
-            return result
-        }
-
-    private val dashboardTransactions: List<Transaction>
-        get() {
-            if (!hasMonthContent) return emptyList()
-            val selected = selectedExpenseCategory ?: return transactions
-            return transactions.filter { it.type == "expense" && it.category == selected }
-        }
-
-    private fun formFingerprint(): String = formFingerprint(
-        type = formType,
-        category = formCategory,
-        amount = formAmount,
-        currency = formCurrency,
-        description = formDescription,
-        occurredAt = formOccurredAt,
-    )
-}
-
 class MoneyManagerViewModel(
     private val apiClient: MoneyManagerApi,
     private val tokenStore: SessionStore,
@@ -292,6 +62,32 @@ class MoneyManagerViewModel(
         ),
     )
     val state: StateFlow<MoneyManagerUiState> = _state.asStateFlow()
+
+    private val growthActions = GrowthViewModelActions(
+        api = growthApi,
+        tokenStore = tokenStore,
+        ioDispatcher = ioDispatcher,
+        appScope = viewModelScope,
+        sessionScope = { sessionScope },
+        state = { state.value },
+        updateState = { transform -> _state.update(transform) },
+        handleSessionExpiry = ::handleSessionExpiry,
+        sessionIsCurrent = ::sessionIsCurrent,
+    )
+
+    private val transactionActions = TransactionViewModelActions(
+        api = apiClient,
+        ioDispatcher = ioDispatcher,
+        sessionScope = { sessionScope },
+        state = { state.value },
+        updateState = { transform -> _state.update(transform) },
+        refreshCategories = ::loadCategoriesNow,
+        reloadMonth = { month, forceRefresh -> loadMonth(month, forceRefresh) },
+        invalidateMonth = { month -> monthCache.remove(month) },
+        refreshMonth = ::refresh,
+        handleSessionExpiry = ::handleSessionExpiry,
+        sessionIsCurrent = ::sessionIsCurrent,
+    )
 
     init {
         refreshHealth()
@@ -387,165 +183,57 @@ class MoneyManagerViewModel(
     fun selectTab(tab: AppTab) {
         _state.update { it.copy(selectedTab = tab, growthDestination = null, profileError = null) }
         if (tab == AppTab.Profile) refreshHealth()
-        if (tab == AppTab.Investments) loadInvestments()
+        if (tab == AppTab.Investments) growthActions.refreshInvestments()
     }
 
-    fun openGrowthDestination(destination: GrowthDestination) {
-        _state.update { it.copy(growthDestination = destination, growth = it.growth.copy(error = null)) }
-        loadPlanning()
-    }
+    fun openGrowthDestination(destination: GrowthDestination) = growthActions.openDestination(destination)
 
-    fun closeGrowthDestination() {
-        _state.update { it.copy(growthDestination = null, growth = it.growth.copy(error = null)) }
-    }
+    fun closeGrowthDestination() = growthActions.closeDestination()
 
-    fun refreshPlanning() = loadPlanning()
+    fun refreshPlanning() = growthActions.refreshPlanning()
 
-    fun refreshInvestments() = loadInvestments()
+    fun refreshInvestments() = growthActions.refreshInvestments()
 
-    fun createSchedule(request: TransactionScheduleRequest) = mutateGrowth(refresh = ::loadPlanning) { api, token ->
-        api.createSchedule(token, request)
-    }
+    fun createSchedule(request: TransactionScheduleRequest) = growthActions.createSchedule(request)
 
-    fun toggleSchedule(schedule: TransactionSchedule) = mutateGrowth(refresh = ::loadPlanning) { api, token ->
-        if (schedule.status == "active") api.pauseSchedule(token, schedule.id) else api.resumeSchedule(token, schedule.id)
-    }
+    fun toggleSchedule(schedule: TransactionSchedule) = growthActions.toggleSchedule(schedule)
 
-    fun deleteSchedule(id: Int) = mutateGrowth(refresh = ::loadPlanning) { api, token ->
-        api.deleteSchedule(token, id)
-    }
+    fun deleteSchedule(id: Int) = growthActions.deleteSchedule(id)
 
-    fun createBudget(request: BudgetRequest) = mutateGrowth(refresh = ::loadPlanning) { api, token ->
-        api.createBudget(token, request)
-    }
+    fun createBudget(request: BudgetRequest) = growthActions.createBudget(request)
 
-    fun deleteBudget(id: Int) = mutateGrowth(refresh = ::loadPlanning) { api, token ->
-        api.deleteBudget(token, id)
-    }
+    fun deleteBudget(id: Int) = growthActions.deleteBudget(id)
 
     fun updateNotificationPreferences(preferences: NotificationPreferences) =
-        mutateGrowth(refresh = ::loadPlanning) { api, token ->
-            api.updateNotificationPreferences(token, preferences)
-        }
+        growthActions.updateNotificationPreferences(preferences)
 
-    fun registerPushDevice(deviceToken: String) {
-        val token = state.value.token ?: return
-        val api = growthApi ?: return
-        sessionScope.launch {
-            try {
-                withContext(ioDispatcher) { api.registerPushDevice(token, deviceToken) }
-                    .also(tokenStore::savePushDeviceID)
-            } catch (error: Exception) {
-                if (error is CancellationException) throw error
-                handleSessionExpiry(error, token)
-            }
-        }
-    }
+    fun registerPushDevice(deviceToken: String) = growthActions.registerPushDevice(deviceToken)
 
-    fun openPushEvent(eventType: String) {
-        _state.update { current ->
-            when (eventType) {
-                "bank_spending", "scheduled_transaction_posted", "scheduled_transaction_due" -> current.copy(
-                    selectedTab = AppTab.Transactions,
-                    growthDestination = null,
-                )
-                "budget_alert" -> current.copy(
-                    selectedTab = AppTab.Profile,
-                    growthDestination = GrowthDestination.Budgets,
-                )
-                "investment_reminder" -> current.copy(
-                    selectedTab = AppTab.Investments,
-                    growthDestination = null,
-                )
-                else -> current
-            }
-        }
-    }
+    fun openPushEvent(eventType: String) = growthActions.openPushEvent(eventType)
 
-    private fun unregisterPushDevice() {
-        val token = state.value.token ?: return
-        val deviceID = tokenStore.getPushDeviceID() ?: return
-        val api = growthApi ?: return
-        viewModelScope.launch(ioDispatcher) {
-            try {
-                api.deletePushDevice(token, deviceID)
-                tokenStore.clearPushDeviceID()
-            } catch (_: Exception) {
-                // A later device registration reassigns the same installation safely.
-            }
-        }
-    }
+    private fun unregisterPushDevice() = growthActions.unregisterPushDevice()
 
     fun createInvestmentTrade(request: InvestmentTradeRequest) =
-        mutateGrowth(refresh = ::loadInvestments) { api, token ->
-            api.createInvestmentTrade(token, request)
-        }
+        growthActions.createInvestmentTrade(request)
 
-    fun deleteInvestmentTrade(id: Int) = mutateGrowth(refresh = ::loadInvestments) { api, token ->
-        api.deleteInvestmentTrade(token, id)
-    }
+    fun deleteInvestmentTrade(id: Int) = growthActions.deleteInvestmentTrade(id)
 
     fun setInvestmentPrice(request: InvestmentPriceRequest) =
-        mutateGrowth(refresh = ::loadInvestments) { api, token ->
-            api.setInvestmentPrice(token, request)
-        }
+        growthActions.setInvestmentPrice(request)
 
     fun createInvestmentSchedule(request: InvestmentScheduleRequest) =
-        mutateGrowth(refresh = ::loadInvestments) { api, token ->
-            api.createInvestmentSchedule(token, request)
-        }
+        growthActions.createInvestmentSchedule(request)
 
     fun toggleInvestmentSchedule(schedule: InvestmentSchedule) =
-        mutateGrowth(refresh = ::loadInvestments) { api, token ->
-            if (schedule.status == "active") {
-                api.pauseInvestmentSchedule(token, schedule.id)
-            } else {
-                api.resumeInvestmentSchedule(token, schedule.id)
-            }
-        }
+        growthActions.toggleInvestmentSchedule(schedule)
 
-    fun deleteInvestmentSchedule(id: Int) = mutateGrowth(refresh = ::loadInvestments) { api, token ->
-        api.deleteInvestmentSchedule(token, id)
-    }
+    fun deleteInvestmentSchedule(id: Int) = growthActions.deleteInvestmentSchedule(id)
 
-    fun exportInvestments(from: String, to: String) {
-        val token = state.value.token ?: return
-        val api = growthApi ?: return showGrowthUnavailable()
-        val fromDate = from.toLocalDateOrNull()
-        val toDate = to.toLocalDateOrNull()
-        if (fromDate == null || toDate == null || fromDate.isAfter(toDate)) {
-            _state.update { it.copy(growth = it.growth.copy(error = "Choose a valid export date range")) }
-            return
-        }
-        sessionScope.launch {
-            _state.update { it.copy(growth = it.growth.copy(isMutating = true, error = null)) }
-            try {
-                val csv = withContext(ioDispatcher) { api.exportInvestmentsCsv(token, from, to) }
-                if (!sessionIsCurrent(token)) return@launch
-                _state.update {
-                    it.copy(
-                        growth = it.growth.copy(
-                            investmentExportCsv = csv,
-                            investmentExportFileName = "money-manager-investments-$from-to-$to.csv",
-                        ),
-                    )
-                }
-            } catch (error: Exception) {
-                if (error is CancellationException) throw error
-                if (!handleSessionExpiry(error, token) && sessionIsCurrent(token)) showGrowthError(error)
-            } finally {
-                if (sessionIsCurrent(token)) {
-                    _state.update { it.copy(growth = it.growth.copy(isMutating = false)) }
-                }
-            }
-        }
-    }
+    fun exportInvestments(from: String, to: String) = growthActions.exportInvestments(from, to)
 
-    fun clearInvestmentExport() = _state.update {
-        it.copy(growth = it.growth.copy(investmentExportCsv = null, investmentExportFileName = null))
-    }
+    fun clearInvestmentExport() = growthActions.clearInvestmentExport()
 
-    fun clearGrowthError() = _state.update { it.copy(growth = it.growth.copy(error = null)) }
+    fun clearGrowthError() = growthActions.clearError()
 
     fun previousMonth() = moveMonth(-1)
 
@@ -555,416 +243,69 @@ class MoneyManagerViewModel(
 
     fun refresh() = loadMonth(state.value.month, forceRefresh = true)
 
-    fun selectExpenseCategory(category: String) {
-        _state.update {
-            it.copy(selectedExpenseCategory = if (it.selectedExpenseCategory == category) null else category)
-        }
-    }
+    fun selectExpenseCategory(category: String) = transactionActions.selectExpenseCategory(category)
 
-    fun clearSelectedExpenseCategory() {
-        _state.update { it.copy(selectedExpenseCategory = null) }
-    }
+    fun clearSelectedExpenseCategory() = transactionActions.clearSelectedExpenseCategory()
 
-    fun updateFilterType(value: String?) = _state.update {
-        it.copy(filterType = value, filterCategory = null)
-    }
+    fun updateFilterType(value: String?) = transactionActions.updateFilterType(value)
 
-    fun updateFilterCategory(value: String?) = _state.update { it.copy(filterCategory = value) }
+    fun updateFilterCategory(value: String?) = transactionActions.updateFilterCategory(value)
 
-    fun updateSearchQuery(value: String) = _state.update { it.copy(searchQuery = value) }
+    fun updateSearchQuery(value: String) = transactionActions.updateSearchQuery(value)
 
-    fun clearTransactionFilters() = _state.update {
-        it.copy(filterType = null, filterCategory = null, searchQuery = "")
-    }
+    fun clearTransactionFilters() = transactionActions.clearTransactionFilters()
 
-    fun showAllTransactions() = _state.update {
-        it.copy(
-            selectedTab = AppTab.Transactions,
-            filterType = if (it.selectedExpenseCategory == null) null else "expense",
-            filterCategory = it.selectedExpenseCategory,
-            searchQuery = "",
-        )
-    }
+    fun showAllTransactions() = transactionActions.showAllTransactions()
 
-    fun updateFormType(value: String) {
-        if (state.value.isFormSaving) return
-        _state.update {
-            val categories = if (value == "income") it.incomeCategories else it.expenseCategories
-            it.copy(
-                formType = value,
-                formCategory = categories.firstOrNull()?.name ?: if (value == "income") "salary" else "food",
-                formError = null,
-            )
-        }
-    }
+    fun updateFormType(value: String) = transactionActions.updateFormType(value)
 
-    fun updateFormCategory(value: String) {
-        if (state.value.isFormSaving) return
-        _state.update { it.copy(formCategory = value, formError = null) }
-    }
+    fun updateFormCategory(value: String) = transactionActions.updateFormCategory(value)
 
-    fun chooseFormCategory(value: String) {
-        if (state.value.isFormSaving || state.value.isCategoryMutating) return
-        _state.update {
-            it.copy(
-                formCategory = value,
-                isCategoryPickerOpen = false,
-                newCategoryName = "",
-                categoryError = null,
-                formError = null,
-            )
-        }
-    }
+    fun chooseFormCategory(value: String) = transactionActions.chooseFormCategory(value)
 
-    fun updateFormAmount(value: String) {
-        if (state.value.isFormSaving) return
-        if (value.length <= MAX_AMOUNT_LENGTH && value.all { it.isDigit() || it == '.' || it == ',' || it.isWhitespace() }) {
-            _state.update { it.copy(formAmount = value, formError = null) }
-        }
-    }
+    fun updateFormAmount(value: String) = transactionActions.updateFormAmount(value)
 
-    fun updateFormDescription(value: String) {
-        if (state.value.isFormSaving) return
-        if (value.length <= MAX_DESCRIPTION_LENGTH) {
-            _state.update { it.copy(formDescription = value, formError = null) }
-        }
-    }
+    fun updateFormDescription(value: String) = transactionActions.updateFormDescription(value)
 
-    fun updateFormOccurredAt(value: String) {
-        if (state.value.isFormSaving) return
-        _state.update { it.copy(formOccurredAt = value, formError = null) }
-    }
+    fun updateFormOccurredAt(value: String) = transactionActions.updateFormOccurredAt(value)
 
-    fun updateNewCategoryName(value: String) {
-        if (state.value.isCategoryMutating) return
-        _state.update { it.copy(newCategoryName = value, categoryError = null) }
-    }
+    fun updateNewCategoryName(value: String) = transactionActions.updateNewCategoryName(value)
 
-    fun openCategoryPicker() = _state.update {
-        it.copy(isCategoryPickerOpen = true, categoryError = null)
-    }
+    fun openCategoryPicker() = transactionActions.openCategoryPicker()
 
-    fun closeCategoryPicker() {
-        if (state.value.isCategoryMutating) return
-        _state.update {
-            it.copy(isCategoryPickerOpen = false, newCategoryName = "", categoryError = null)
-        }
-    }
+    fun closeCategoryPicker() = transactionActions.closeCategoryPicker()
 
-    fun addCategory() {
-        val current = state.value
-        val token = current.token ?: return
-        if (current.isCategoryMutating || current.isFormSaving) return
-        val name = current.newCategoryName.trim()
-        if (name.isBlank()) {
-            _state.update { it.copy(categoryError = "Enter a category name") }
-            return
-        }
-        sessionScope.launch {
-            _state.update { it.copy(isCategoryMutating = true, categoryError = null) }
-            try {
-                val category = withContext(ioDispatcher) {
-                    apiClient.createCategory(token, current.formType, name)
-                }
-                loadCategoriesNow(token)
-                if (!sessionIsCurrent(token) || state.value.formType != current.formType || !state.value.isCategoryPickerOpen) return@launch
-                _state.update {
-                    it.copy(
-                        formCategory = category.name,
-                        isCategoryPickerOpen = false,
-                        newCategoryName = "",
-                    )
-                }
-            } catch (error: Exception) {
-                if (error is CancellationException) throw error
-                if (!handleSessionExpiry(error, token) && sessionIsCurrent(token)) {
-                    _state.update { it.copy(categoryError = userMessage(error)) }
-                }
-            } finally {
-                if (sessionIsCurrent(token)) {
-                    _state.update { it.copy(isCategoryMutating = false) }
-                }
-            }
-        }
-    }
+    fun addCategory() = transactionActions.addCategory()
 
-    fun deleteCategory(category: Category) {
-        val current = state.value
-        val token = current.token ?: return
-        if (current.isCategoryMutating || current.isFormSaving) return
-        if (category.isDefault || category.id == 0) return
-        sessionScope.launch {
-            _state.update { it.copy(isCategoryMutating = true, categoryError = null) }
-            try {
-                withContext(ioDispatcher) { apiClient.deleteCategory(token, category.id) }
-                loadCategoriesNow(token)
-                if (!sessionIsCurrent(token)) return@launch
-                _state.update {
-                    val categories = if (it.formType == "income") it.incomeCategories else it.expenseCategories
-                    it.copy(
-                        formCategory = if (it.formCategory == category.name) {
-                            categories.firstOrNull()?.name ?: if (it.formType == "income") "salary" else "food"
-                        } else {
-                            it.formCategory
-                        },
-                    )
-                }
-            } catch (error: Exception) {
-                if (error is CancellationException) throw error
-                if (!handleSessionExpiry(error, token) && sessionIsCurrent(token)) {
-                    _state.update { it.copy(categoryError = userMessage(error)) }
-                }
-            } finally {
-                if (sessionIsCurrent(token)) {
-                    _state.update { it.copy(isCategoryMutating = false) }
-                }
-            }
-        }
-    }
+    fun deleteCategory(category: Category) = transactionActions.deleteCategory(category)
 
-    fun openNewTransactionForm() {
-        val current = state.value
-        val category = current.expenseCategories.firstOrNull()?.name ?: "food"
-        val currency = current.summary?.takeIf { current.hasMonthContent }?.currency ?: "EUR"
-        val date = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
-        val baseline = formFingerprint("expense", category, "", currency, "", date)
-        _state.update {
-            it.copy(
-                isTransactionFormOpen = true,
-                editingId = null,
-                formType = "expense",
-                formCategory = category,
-                formAmount = "",
-                formCurrency = currency,
-                formDescription = "",
-                formOccurredAt = date,
-                formBaseline = baseline,
-                formError = null,
-                categoryError = null,
-            )
-        }
-    }
+    fun openNewTransactionForm() = transactionActions.openNewTransactionForm()
 
-    fun openPhysicalPurchaseForm() {
-        openNewTransactionForm()
-        _state.update {
-            val baseline = formFingerprint("expense", "shopping", "", it.formCurrency, "Physical purchase", it.formOccurredAt)
-            it.copy(
-                formType = "expense",
-                formCategory = "shopping",
-                formDescription = "Physical purchase",
-                formBaseline = baseline,
-            )
-        }
-    }
+    fun openPhysicalPurchaseForm() = transactionActions.openPhysicalPurchaseForm()
 
-    fun closeTransactionForm() {
-        _state.update(::resetEditorState)
-    }
+    fun closeTransactionForm() = transactionActions.closeTransactionForm()
 
-    fun saveTransaction() {
-        val current = state.value
-        val token = current.token ?: return
-        if (current.isFormSaving) return
-        val sourceMonth = current.month
-        validateTransactionForm(current)?.let { message ->
-            _state.update { it.copy(formError = message) }
-            return
-        }
-        val amount = parseLocalizedDecimal(current.formAmount) ?: return
-        val request = TransactionRequest(
-            type = current.formType,
-            category = current.formCategory,
-            description = current.formDescription.trim(),
-            amount = amount.stripTrailingZeros().toPlainString(),
-            currency = current.formCurrency,
-            occurredAt = current.formOccurredAt,
-        )
+    fun saveTransaction() = transactionActions.saveTransaction()
 
-        sessionScope.launch {
-            _state.update { it.copy(isFormSaving = true, formError = null) }
-            try {
-                withContext(ioDispatcher) {
-                    if (current.editingId == null) {
-                        apiClient.createTransaction(token, request)
-                    } else {
-                        apiClient.updateTransaction(token, current.editingId, request)
-                    }
-                }
-                if (!sessionIsCurrent(token)) return@launch
-                val transactionMonth = YearMonth.from(LocalDate.parse(current.formOccurredAt)).format(monthFormatter)
-                monthCache.remove(sourceMonth)
-                monthCache.remove(transactionMonth)
-                _state.update { resetEditorState(it).copy(month = transactionMonth) }
-                loadMonth(transactionMonth, forceRefresh = true)
-            } catch (error: Exception) {
-                if (error is CancellationException) throw error
-                if (!handleSessionExpiry(error, token) && sessionIsCurrent(token)) {
-                    _state.update { it.copy(formError = userMessage(error)) }
-                }
-            } finally {
-                if (sessionIsCurrent(token)) {
-                    _state.update { it.copy(isFormSaving = false) }
-                }
-            }
-        }
-    }
+    fun editTransaction(transaction: Transaction) = transactionActions.editTransaction(transaction)
 
-    fun editTransaction(transaction: Transaction) {
-        val baseline = formFingerprint(
-            transaction.type,
-            transaction.category,
-            transaction.amount,
-            transaction.currency,
-            transaction.description,
-            transaction.occurredAt.dateOnly(),
-        )
-        _state.update {
-            it.copy(
-                editingId = transaction.id,
-                formType = transaction.type,
-                formCategory = transaction.category,
-                formAmount = transaction.amount,
-                formCurrency = transaction.currency,
-                formDescription = transaction.description,
-                formOccurredAt = transaction.occurredAt.dateOnly(),
-                formBaseline = baseline,
-                formError = null,
-                isTransactionFormOpen = true,
-            )
-        }
-    }
+    fun deleteTransaction(id: Int) = transactionActions.deleteTransaction(id)
 
-    fun deleteTransaction(id: Int) {
-        val current = state.value
-        val token = current.token ?: return
-        val sourceMonth = current.month
-        sessionScope.launch {
-            _state.update { it.copy(isTransactionMutating = true, monthError = null) }
-            try {
-                withContext(ioDispatcher) { apiClient.deleteTransaction(token, id) }
-                if (!sessionIsCurrent(token)) return@launch
-                monthCache.remove(sourceMonth)
-                if (state.value.month == sourceMonth) {
-                    loadMonth(sourceMonth, forceRefresh = true)
-                }
-            } catch (error: Exception) {
-                if (error is CancellationException) throw error
-                if (!handleSessionExpiry(error, token) && sessionIsCurrent(token)) {
-                    _state.update { it.copy(monthError = userMessage(error)) }
-                }
-            } finally {
-                if (sessionIsCurrent(token)) {
-                    _state.update { it.copy(isTransactionMutating = false) }
-                }
-            }
-        }
-    }
+    fun openExportDialog() = transactionActions.openExportDialog()
 
-    fun openExportDialog() {
-        val selectedMonth = runCatching { YearMonth.parse(state.value.month) }.getOrDefault(YearMonth.now())
-        val today = LocalDate.now()
-        val end = minOf(selectedMonth.atEndOfMonth(), today)
-        _state.update {
-            it.copy(
-                isExportDialogOpen = true,
-                exportFrom = selectedMonth.atDay(1).format(DateTimeFormatter.ISO_LOCAL_DATE),
-                exportTo = end.format(DateTimeFormatter.ISO_LOCAL_DATE),
-                exportError = null,
-            )
-        }
-    }
+    fun closeExportDialog() = transactionActions.closeExportDialog()
 
-    fun closeExportDialog() {
-        if (state.value.isExporting) return
-        _state.update {
-            it.copy(isExportDialogOpen = false, exportError = null)
-        }
-    }
+    fun updateExportFrom(value: String) = transactionActions.updateExportFrom(value)
 
-    fun updateExportFrom(value: String) {
-        if (state.value.isExporting) return
-        _state.update { it.copy(exportFrom = value, exportError = null) }
-    }
+    fun updateExportTo(value: String) = transactionActions.updateExportTo(value)
 
-    fun updateExportTo(value: String) {
-        if (state.value.isExporting) return
-        _state.update { it.copy(exportTo = value, exportError = null) }
-    }
+    fun exportTransactions() = transactionActions.exportTransactions()
 
-    fun exportTransactions() {
-        val current = state.value
-        val token = current.token ?: return
-        if (current.isExporting) return
-        val fromDate = current.exportFrom.toLocalDateOrNull()
-        val toDate = current.exportTo.toLocalDateOrNull()
-        val validationError = when {
-            fromDate == null -> "Choose a valid start date"
-            toDate == null -> "Choose a valid end date"
-            fromDate.isAfter(toDate) -> "Start date must be before end date"
-            else -> null
-        }
-        if (validationError != null) {
-            _state.update { it.copy(exportError = validationError) }
-            return
-        }
+    fun clearExportResult() = transactionActions.clearExportResult()
 
-        sessionScope.launch {
-            _state.update { it.copy(isExporting = true, exportError = null) }
-            try {
-                val csv = withContext(ioDispatcher) {
-                    apiClient.exportTransactionsCsv(token, current.exportFrom, current.exportTo)
-                }
-                if (!sessionIsCurrent(token)) return@launch
-                _state.update {
-                    it.copy(
-                        isExportDialogOpen = false,
-                        exportCsvContent = csv,
-                        exportFileName = "money-manager-${current.exportFrom}-to-${current.exportTo}.csv",
-                    )
-                }
-            } catch (error: Exception) {
-                if (error is CancellationException) throw error
-                if (!handleSessionExpiry(error, token) && sessionIsCurrent(token)) {
-                    _state.update { it.copy(exportError = userMessage(error)) }
-                }
-            } finally {
-                if (sessionIsCurrent(token)) {
-                    _state.update { it.copy(isExporting = false) }
-                }
-            }
-        }
-    }
+    fun importRevolutCsv(contents: ByteArray) = transactionActions.importRevolutCsv(contents)
 
-    fun clearExportResult() = _state.update {
-        it.copy(exportCsvContent = null, exportFileName = null)
-    }
-
-    fun importRevolutCsv(contents: ByteArray) {
-        val current = state.value
-        val token = current.token ?: return
-        if (current.isImporting) return
-        sessionScope.launch {
-            _state.update { it.copy(isImporting = true, profileError = null) }
-            try {
-                val result = withContext(ioDispatcher) { apiClient.importRevolutCsv(token, contents) }
-                if (!sessionIsCurrent(token)) return@launch
-                _state.update {
-                    it.copy(importMessage = "Imported ${result.imported}. Skipped ${result.skipped} duplicates and ${result.ignored} unsupported rows.")
-                }
-                refresh()
-            } catch (error: Exception) {
-                if (error is CancellationException) throw error
-                if (!handleSessionExpiry(error, token) && sessionIsCurrent(token)) {
-                    _state.update { it.copy(profileError = userMessage(error)) }
-                }
-            } finally {
-                if (sessionIsCurrent(token)) _state.update { it.copy(isImporting = false) }
-            }
-        }
-    }
-
-    fun clearImportMessage() = _state.update { it.copy(importMessage = null) }
+    fun clearImportMessage() = transactionActions.clearImportMessage()
 
     fun refreshHealth() {
         viewModelScope.launch {
@@ -984,114 +325,6 @@ class MoneyManagerViewModel(
                 }
             }
         }
-    }
-
-    private fun loadPlanning() {
-        val token = state.value.token ?: return
-        val api = growthApi ?: return showGrowthUnavailable()
-        sessionScope.launch {
-            _state.update { it.copy(growth = it.growth.copy(isPlanningLoading = true, error = null)) }
-            try {
-                val result = withContext(ioDispatcher) {
-                    coroutineScope {
-                        val schedules = async { api.getSchedules(token) }
-                        val budgets = async { api.getBudgets(token) }
-                        val preferences = async { api.getNotificationPreferences(token) }
-                        Triple(schedules.await(), budgets.await(), preferences.await())
-                    }
-                }
-                if (!sessionIsCurrent(token)) return@launch
-                _state.update {
-                    it.copy(
-                        growth = it.growth.copy(
-                            schedules = result.first,
-                            budgets = result.second,
-                            notificationPreferences = result.third,
-                            isPlanningLoading = false,
-                            error = null,
-                        ),
-                    )
-                }
-            } catch (error: Exception) {
-                if (error is CancellationException) throw error
-                if (!handleSessionExpiry(error, token) && sessionIsCurrent(token)) showGrowthError(error)
-            } finally {
-                if (sessionIsCurrent(token)) {
-                    _state.update { it.copy(growth = it.growth.copy(isPlanningLoading = false)) }
-                }
-            }
-        }
-    }
-
-    private fun loadInvestments() {
-        val token = state.value.token ?: return
-        val api = growthApi ?: return showGrowthUnavailable()
-        sessionScope.launch {
-            _state.update { it.copy(growth = it.growth.copy(isInvestmentsLoading = true, error = null)) }
-            try {
-                val result = withContext(ioDispatcher) {
-                    coroutineScope {
-                        val portfolio = async { api.getInvestmentPortfolio(token) }
-                        val trades = async { api.getInvestmentTrades(token) }
-                        val schedules = async { api.getInvestmentSchedules(token) }
-                        Triple(portfolio.await(), trades.await(), schedules.await())
-                    }
-                }
-                if (!sessionIsCurrent(token)) return@launch
-                _state.update {
-                    it.copy(
-                        growth = it.growth.copy(
-                            portfolio = result.first,
-                            trades = result.second,
-                            investmentSchedules = result.third,
-                            isInvestmentsLoading = false,
-                            error = null,
-                        ),
-                    )
-                }
-            } catch (error: Exception) {
-                if (error is CancellationException) throw error
-                if (!handleSessionExpiry(error, token) && sessionIsCurrent(token)) showGrowthError(error)
-            } finally {
-                if (sessionIsCurrent(token)) {
-                    _state.update { it.copy(growth = it.growth.copy(isInvestmentsLoading = false)) }
-                }
-            }
-        }
-    }
-
-    private fun mutateGrowth(
-        refresh: () -> Unit,
-        operation: (GrowthApi, String) -> Any?,
-    ) {
-        val token = state.value.token ?: return
-        val api = growthApi ?: return showGrowthUnavailable()
-        if (state.value.growth.isMutating) return
-        sessionScope.launch {
-            _state.update { it.copy(growth = it.growth.copy(isMutating = true, error = null)) }
-            try {
-                withContext(ioDispatcher) { operation(api, token) }
-                if (!sessionIsCurrent(token)) return@launch
-                refresh()
-            } catch (error: Exception) {
-                if (error is CancellationException) throw error
-                if (!handleSessionExpiry(error, token) && sessionIsCurrent(token)) showGrowthError(error)
-            } finally {
-                if (sessionIsCurrent(token)) {
-                    _state.update { it.copy(growth = it.growth.copy(isMutating = false)) }
-                }
-            }
-        }
-    }
-
-    private fun showGrowthUnavailable() {
-        _state.update {
-            it.copy(growth = it.growth.copy(error = "This build does not include planning services"))
-        }
-    }
-
-    private fun showGrowthError(error: Exception) {
-        _state.update { it.copy(growth = it.growth.copy(error = userMessage(error))) }
     }
 
     private fun moveMonth(delta: Long) {
@@ -1255,79 +488,4 @@ class MoneyManagerViewModel(
     }
 
     private fun sessionIsCurrent(token: String): Boolean = state.value.token == token
-}
-
-class MoneyManagerViewModelFactory(
-    private val apiClient: MoneyManagerApi,
-    private val tokenStore: SessionStore,
-) : ViewModelProvider.Factory {
-    @Suppress("UNCHECKED_CAST")
-    override fun <T : ViewModel> create(modelClass: Class<T>): T =
-        MoneyManagerViewModel(apiClient, tokenStore) as T
-}
-
-private val monthFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM")
-private const val MAX_DESCRIPTION_LENGTH = 200
-private const val MAX_AMOUNT_LENGTH = 18
-private val emailPattern = Regex("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")
-
-private fun List<Transaction>.sumAmounts(): BigDecimal =
-    fold(BigDecimal.ZERO) { total, transaction -> total + transaction.amount.toMoney() }
-
-private fun String.toMoney(): BigDecimal = BigDecimal(this)
-
-private fun String.toLocalDateOrNull(): LocalDate? =
-    runCatching { LocalDate.parse(dateOnly()) }.getOrNull()
-
-private fun String.dateOnly(): String = take(10)
-
-private fun validateAuth(state: MoneyManagerUiState): String? = when {
-    state.email.isBlank() -> "Enter your email address"
-    !emailPattern.matches(state.email.trim()) -> "Enter a valid email address"
-    state.password.isBlank() -> "Enter your password"
-    state.isRegisterMode && state.password.length < 8 -> "Use at least 8 characters for your password"
-    state.isRegisterMode && state.password != state.confirmPassword -> "Passwords do not match"
-    else -> null
-}
-
-private fun validateTransactionForm(state: MoneyManagerUiState): String? {
-    val amount = parseLocalizedDecimal(state.formAmount)
-    return when {
-        amount == null || amount <= BigDecimal.ZERO -> "Enter an amount greater than 0"
-        amount.scale() > 2 -> "Use no more than two decimal places"
-        state.formCategory.isBlank() -> "Choose a category"
-        state.formOccurredAt.toLocalDateOrNull() == null -> "Choose a valid date"
-        state.formDescription.length > MAX_DESCRIPTION_LENGTH -> "Description is too long"
-        else -> null
-    }
-}
-
-private fun resetEditorState(state: MoneyManagerUiState): MoneyManagerUiState = state.copy(
-    isTransactionFormOpen = false,
-    editingId = null,
-    formType = "expense",
-    formCategory = state.expenseCategories.firstOrNull()?.name ?: "food",
-    formAmount = "",
-    formDescription = "",
-    formOccurredAt = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE),
-    formBaseline = "",
-    formError = null,
-    isCategoryPickerOpen = false,
-    newCategoryName = "",
-    categoryError = null,
-)
-
-private fun formFingerprint(
-    type: String,
-    category: String,
-    amount: String,
-    currency: String,
-    description: String,
-    occurredAt: String,
-): String = listOf(type, category, amount, currency, description, occurredAt).joinToString("\u0000")
-
-private fun userMessage(error: Exception): String = when (error) {
-    is ApiException -> error.message ?: "The server could not complete the request"
-    is IOException -> "Could not connect. Check your connection and try again."
-    else -> error.message ?: "Something went wrong. Try again."
 }
