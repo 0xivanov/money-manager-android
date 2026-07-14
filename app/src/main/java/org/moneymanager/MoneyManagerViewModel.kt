@@ -23,11 +23,23 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.moneymanager.data.ApiException
+import org.moneymanager.data.GrowthApi
 import org.moneymanager.data.MoneyManagerApi
 import org.moneymanager.data.SessionStore
+import org.moneymanager.model.Budget
+import org.moneymanager.model.BudgetRequest
 import org.moneymanager.model.Category
+import org.moneymanager.model.InvestmentPortfolio
+import org.moneymanager.model.InvestmentPriceRequest
+import org.moneymanager.model.InvestmentSchedule
+import org.moneymanager.model.InvestmentScheduleRequest
+import org.moneymanager.model.InvestmentTrade
+import org.moneymanager.model.InvestmentTradeRequest
+import org.moneymanager.model.NotificationPreferences
 import org.moneymanager.model.Transaction
 import org.moneymanager.model.TransactionRequest
+import org.moneymanager.model.TransactionSchedule
+import org.moneymanager.model.TransactionScheduleRequest
 import org.moneymanager.model.TransactionSummary
 
 data class CategoryTotal(
@@ -66,6 +78,27 @@ enum class ConnectionStatus {
     Connected,
     Offline,
 }
+
+enum class GrowthDestination {
+    Schedules,
+    Budgets,
+    Notifications,
+}
+
+data class GrowthUiState(
+    val schedules: List<TransactionSchedule> = emptyList(),
+    val budgets: List<Budget> = emptyList(),
+    val notificationPreferences: NotificationPreferences? = null,
+    val portfolio: InvestmentPortfolio? = null,
+    val trades: List<InvestmentTrade> = emptyList(),
+    val investmentSchedules: List<InvestmentSchedule> = emptyList(),
+    val isPlanningLoading: Boolean = false,
+    val isInvestmentsLoading: Boolean = false,
+    val isMutating: Boolean = false,
+    val error: String? = null,
+    val investmentExportCsv: String? = null,
+    val investmentExportFileName: String? = null,
+)
 
 data class MoneyManagerUiState(
     val token: String? = null,
@@ -118,6 +151,8 @@ data class MoneyManagerUiState(
     val isAccountDeleting: Boolean = false,
     val connectionStatus: ConnectionStatus = ConnectionStatus.Checking,
     val connectionMessage: String? = null,
+    val growthDestination: GrowthDestination? = null,
+    val growth: GrowthUiState = GrowthUiState(),
 ) {
     val hasMonthContent: Boolean
         get() = loadedMonth == month && summary != null
@@ -241,6 +276,7 @@ class MoneyManagerViewModel(
     private val apiClient: MoneyManagerApi,
     private val tokenStore: SessionStore,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val growthApi: GrowthApi? = apiClient as? GrowthApi,
 ) : ViewModel() {
     private val monthCache = mutableMapOf<String, MonthSnapshot>()
     private var authJob: Job? = null
@@ -324,6 +360,7 @@ class MoneyManagerViewModel(
     }
 
     fun logout() {
+        unregisterPushDevice()
         clearSession()
     }
 
@@ -348,9 +385,167 @@ class MoneyManagerViewModel(
     }
 
     fun selectTab(tab: AppTab) {
-        _state.update { it.copy(selectedTab = tab, profileError = null) }
+        _state.update { it.copy(selectedTab = tab, growthDestination = null, profileError = null) }
         if (tab == AppTab.Profile) refreshHealth()
+        if (tab == AppTab.Investments) loadInvestments()
     }
+
+    fun openGrowthDestination(destination: GrowthDestination) {
+        _state.update { it.copy(growthDestination = destination, growth = it.growth.copy(error = null)) }
+        loadPlanning()
+    }
+
+    fun closeGrowthDestination() {
+        _state.update { it.copy(growthDestination = null, growth = it.growth.copy(error = null)) }
+    }
+
+    fun refreshPlanning() = loadPlanning()
+
+    fun refreshInvestments() = loadInvestments()
+
+    fun createSchedule(request: TransactionScheduleRequest) = mutateGrowth(refresh = ::loadPlanning) { api, token ->
+        api.createSchedule(token, request)
+    }
+
+    fun toggleSchedule(schedule: TransactionSchedule) = mutateGrowth(refresh = ::loadPlanning) { api, token ->
+        if (schedule.status == "active") api.pauseSchedule(token, schedule.id) else api.resumeSchedule(token, schedule.id)
+    }
+
+    fun deleteSchedule(id: Int) = mutateGrowth(refresh = ::loadPlanning) { api, token ->
+        api.deleteSchedule(token, id)
+    }
+
+    fun createBudget(request: BudgetRequest) = mutateGrowth(refresh = ::loadPlanning) { api, token ->
+        api.createBudget(token, request)
+    }
+
+    fun deleteBudget(id: Int) = mutateGrowth(refresh = ::loadPlanning) { api, token ->
+        api.deleteBudget(token, id)
+    }
+
+    fun updateNotificationPreferences(preferences: NotificationPreferences) =
+        mutateGrowth(refresh = ::loadPlanning) { api, token ->
+            api.updateNotificationPreferences(token, preferences)
+        }
+
+    fun registerPushDevice(deviceToken: String) {
+        val token = state.value.token ?: return
+        val api = growthApi ?: return
+        sessionScope.launch {
+            try {
+                withContext(ioDispatcher) { api.registerPushDevice(token, deviceToken) }
+                    .also(tokenStore::savePushDeviceID)
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                handleSessionExpiry(error, token)
+            }
+        }
+    }
+
+    fun openPushEvent(eventType: String) {
+        _state.update { current ->
+            when (eventType) {
+                "bank_spending", "scheduled_transaction_posted", "scheduled_transaction_due" -> current.copy(
+                    selectedTab = AppTab.Transactions,
+                    growthDestination = null,
+                )
+                "budget_alert" -> current.copy(
+                    selectedTab = AppTab.Profile,
+                    growthDestination = GrowthDestination.Budgets,
+                )
+                "investment_reminder" -> current.copy(
+                    selectedTab = AppTab.Investments,
+                    growthDestination = null,
+                )
+                else -> current
+            }
+        }
+    }
+
+    private fun unregisterPushDevice() {
+        val token = state.value.token ?: return
+        val deviceID = tokenStore.getPushDeviceID() ?: return
+        val api = growthApi ?: return
+        viewModelScope.launch(ioDispatcher) {
+            try {
+                api.deletePushDevice(token, deviceID)
+                tokenStore.clearPushDeviceID()
+            } catch (_: Exception) {
+                // A later device registration reassigns the same installation safely.
+            }
+        }
+    }
+
+    fun createInvestmentTrade(request: InvestmentTradeRequest) =
+        mutateGrowth(refresh = ::loadInvestments) { api, token ->
+            api.createInvestmentTrade(token, request)
+        }
+
+    fun deleteInvestmentTrade(id: Int) = mutateGrowth(refresh = ::loadInvestments) { api, token ->
+        api.deleteInvestmentTrade(token, id)
+    }
+
+    fun setInvestmentPrice(request: InvestmentPriceRequest) =
+        mutateGrowth(refresh = ::loadInvestments) { api, token ->
+            api.setInvestmentPrice(token, request)
+        }
+
+    fun createInvestmentSchedule(request: InvestmentScheduleRequest) =
+        mutateGrowth(refresh = ::loadInvestments) { api, token ->
+            api.createInvestmentSchedule(token, request)
+        }
+
+    fun toggleInvestmentSchedule(schedule: InvestmentSchedule) =
+        mutateGrowth(refresh = ::loadInvestments) { api, token ->
+            if (schedule.status == "active") {
+                api.pauseInvestmentSchedule(token, schedule.id)
+            } else {
+                api.resumeInvestmentSchedule(token, schedule.id)
+            }
+        }
+
+    fun deleteInvestmentSchedule(id: Int) = mutateGrowth(refresh = ::loadInvestments) { api, token ->
+        api.deleteInvestmentSchedule(token, id)
+    }
+
+    fun exportInvestments(from: String, to: String) {
+        val token = state.value.token ?: return
+        val api = growthApi ?: return showGrowthUnavailable()
+        val fromDate = from.toLocalDateOrNull()
+        val toDate = to.toLocalDateOrNull()
+        if (fromDate == null || toDate == null || fromDate.isAfter(toDate)) {
+            _state.update { it.copy(growth = it.growth.copy(error = "Choose a valid export date range")) }
+            return
+        }
+        sessionScope.launch {
+            _state.update { it.copy(growth = it.growth.copy(isMutating = true, error = null)) }
+            try {
+                val csv = withContext(ioDispatcher) { api.exportInvestmentsCsv(token, from, to) }
+                if (!sessionIsCurrent(token)) return@launch
+                _state.update {
+                    it.copy(
+                        growth = it.growth.copy(
+                            investmentExportCsv = csv,
+                            investmentExportFileName = "money-manager-investments-$from-to-$to.csv",
+                        ),
+                    )
+                }
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                if (!handleSessionExpiry(error, token) && sessionIsCurrent(token)) showGrowthError(error)
+            } finally {
+                if (sessionIsCurrent(token)) {
+                    _state.update { it.copy(growth = it.growth.copy(isMutating = false)) }
+                }
+            }
+        }
+    }
+
+    fun clearInvestmentExport() = _state.update {
+        it.copy(growth = it.growth.copy(investmentExportCsv = null, investmentExportFileName = null))
+    }
+
+    fun clearGrowthError() = _state.update { it.copy(growth = it.growth.copy(error = null)) }
 
     fun previousMonth() = moveMonth(-1)
 
@@ -789,6 +984,114 @@ class MoneyManagerViewModel(
                 }
             }
         }
+    }
+
+    private fun loadPlanning() {
+        val token = state.value.token ?: return
+        val api = growthApi ?: return showGrowthUnavailable()
+        sessionScope.launch {
+            _state.update { it.copy(growth = it.growth.copy(isPlanningLoading = true, error = null)) }
+            try {
+                val result = withContext(ioDispatcher) {
+                    coroutineScope {
+                        val schedules = async { api.getSchedules(token) }
+                        val budgets = async { api.getBudgets(token) }
+                        val preferences = async { api.getNotificationPreferences(token) }
+                        Triple(schedules.await(), budgets.await(), preferences.await())
+                    }
+                }
+                if (!sessionIsCurrent(token)) return@launch
+                _state.update {
+                    it.copy(
+                        growth = it.growth.copy(
+                            schedules = result.first,
+                            budgets = result.second,
+                            notificationPreferences = result.third,
+                            isPlanningLoading = false,
+                            error = null,
+                        ),
+                    )
+                }
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                if (!handleSessionExpiry(error, token) && sessionIsCurrent(token)) showGrowthError(error)
+            } finally {
+                if (sessionIsCurrent(token)) {
+                    _state.update { it.copy(growth = it.growth.copy(isPlanningLoading = false)) }
+                }
+            }
+        }
+    }
+
+    private fun loadInvestments() {
+        val token = state.value.token ?: return
+        val api = growthApi ?: return showGrowthUnavailable()
+        sessionScope.launch {
+            _state.update { it.copy(growth = it.growth.copy(isInvestmentsLoading = true, error = null)) }
+            try {
+                val result = withContext(ioDispatcher) {
+                    coroutineScope {
+                        val portfolio = async { api.getInvestmentPortfolio(token) }
+                        val trades = async { api.getInvestmentTrades(token) }
+                        val schedules = async { api.getInvestmentSchedules(token) }
+                        Triple(portfolio.await(), trades.await(), schedules.await())
+                    }
+                }
+                if (!sessionIsCurrent(token)) return@launch
+                _state.update {
+                    it.copy(
+                        growth = it.growth.copy(
+                            portfolio = result.first,
+                            trades = result.second,
+                            investmentSchedules = result.third,
+                            isInvestmentsLoading = false,
+                            error = null,
+                        ),
+                    )
+                }
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                if (!handleSessionExpiry(error, token) && sessionIsCurrent(token)) showGrowthError(error)
+            } finally {
+                if (sessionIsCurrent(token)) {
+                    _state.update { it.copy(growth = it.growth.copy(isInvestmentsLoading = false)) }
+                }
+            }
+        }
+    }
+
+    private fun mutateGrowth(
+        refresh: () -> Unit,
+        operation: (GrowthApi, String) -> Any?,
+    ) {
+        val token = state.value.token ?: return
+        val api = growthApi ?: return showGrowthUnavailable()
+        if (state.value.growth.isMutating) return
+        sessionScope.launch {
+            _state.update { it.copy(growth = it.growth.copy(isMutating = true, error = null)) }
+            try {
+                withContext(ioDispatcher) { operation(api, token) }
+                if (!sessionIsCurrent(token)) return@launch
+                refresh()
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                if (!handleSessionExpiry(error, token) && sessionIsCurrent(token)) showGrowthError(error)
+            } finally {
+                if (sessionIsCurrent(token)) {
+                    _state.update { it.copy(growth = it.growth.copy(isMutating = false)) }
+                }
+            }
+        }
+    }
+
+    private fun showGrowthUnavailable() {
+        _state.update {
+            it.copy(growth = it.growth.copy(error = "This build does not include planning services"))
+        }
+    }
+
+    private fun showGrowthError(error: Exception) {
+        _state.update { it.copy(growth = it.growth.copy(error = userMessage(error))) }
     }
 
     private fun moveMonth(delta: Long) {

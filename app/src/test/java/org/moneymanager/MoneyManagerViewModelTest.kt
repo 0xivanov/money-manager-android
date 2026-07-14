@@ -185,6 +185,7 @@ private class FakeSessionStore(
     private var token: String? = null,
     private var email: String = "",
 ) : SessionStore {
+    private var pushDeviceID: Int? = null
     override fun getToken(): String? = token
     override fun getEmail(): String = email
     override fun saveSession(token: String, email: String) {
@@ -195,6 +196,9 @@ private class FakeSessionStore(
         token = null
         email = ""
     }
+    override fun getPushDeviceID(): Int? = pushDeviceID
+    override fun savePushDeviceID(id: Int) { pushDeviceID = id }
+    override fun clearPushDeviceID() { pushDeviceID = null }
 }
 
 private class FakeApi(

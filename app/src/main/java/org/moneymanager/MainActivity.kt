@@ -12,6 +12,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.FileProvider
@@ -20,6 +21,8 @@ import java.io.File
 import org.moneymanager.data.ApiClient
 import org.moneymanager.data.TokenStore
 import org.moneymanager.notifications.PurchaseNotificationManager
+import org.moneymanager.notifications.EXTRA_PUSH_EVENT
+import org.moneymanager.notifications.FirebasePushConfiguration
 import org.moneymanager.signals.FakePurchaseSignalSource
 
 class MainActivity : ComponentActivity() {
@@ -27,6 +30,8 @@ class MainActivity : ComponentActivity() {
     private val fakePurchaseSignalSource = FakePurchaseSignalSource()
     private var pendingTrackPurchase by mutableStateOf(false)
     private var notificationsEnabled by mutableStateOf(false)
+    private var firebaseDeviceToken by mutableStateOf<String?>(null)
+    private var pendingPushEvent by mutableStateOf<String?>(null)
     private var simulateAfterPermission = false
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -59,15 +64,24 @@ class MainActivity : ComponentActivity() {
             fakePurchaseSignalSource.start {
                 purchaseNotificationManager.showPurchaseDetectedNotification()
             }
-            notificationsEnabled = canPostNotifications()
         }
+        notificationsEnabled = canPostNotifications()
         pendingTrackPurchase = isTrackPurchaseIntent(intent)
+        pendingPushEvent = intent.getStringExtra(EXTRA_PUSH_EVENT)
+        FirebasePushConfiguration.initialize(this) { firebaseDeviceToken = it }
 
         setContent {
             val viewModel: MoneyManagerViewModel = viewModel(
                 factory = MoneyManagerViewModelFactory(apiClient, tokenStore),
             )
             val state by viewModel.state.collectAsState()
+            LaunchedEffect(state.token, firebaseDeviceToken) {
+                if (state.token != null) firebaseDeviceToken?.let(viewModel::registerPushDevice)
+            }
+            LaunchedEffect(pendingPushEvent) {
+                pendingPushEvent?.let(viewModel::openPushEvent)
+                pendingPushEvent = null
+            }
 
             MoneyManagerRoot(
                 state = state,
@@ -88,6 +102,7 @@ class MainActivity : ComponentActivity() {
         if (isTrackPurchaseIntent(intent)) {
             pendingTrackPurchase = true
         }
+        intent.getStringExtra(EXTRA_PUSH_EVENT)?.let { pendingPushEvent = it }
     }
 
     override fun onDestroy() {
@@ -97,7 +112,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (BuildConfig.DEBUG) notificationsEnabled = canPostNotifications()
+        notificationsEnabled = canPostNotifications()
     }
 
     private fun shareCsvFile(fileName: String, csv: String) {
@@ -114,7 +129,7 @@ class MainActivity : ComponentActivity() {
             putExtra(Intent.EXTRA_SUBJECT, fileName)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        startActivity(Intent.createChooser(intent, "Export transactions"))
+        startActivity(Intent.createChooser(intent, "Export CSV"))
     }
 
     private fun requestNotificationPermissionIfNeeded(simulateWhenGranted: Boolean) {

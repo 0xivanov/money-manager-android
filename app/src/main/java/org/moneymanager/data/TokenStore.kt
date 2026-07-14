@@ -9,6 +9,9 @@ interface SessionStore {
     fun getEmail(): String
     fun saveSession(token: String, email: String)
     fun clearToken()
+    fun getPushDeviceID(): Int?
+    fun savePushDeviceID(id: Int)
+    fun clearPushDeviceID()
 }
 
 class TokenStore(context: Context) : SessionStore {
@@ -40,8 +43,19 @@ class TokenStore(context: Context) : SessionStore {
             .apply()
     }
 
+    override fun getPushDeviceID(): Int? = preferences.getInt(KEY_PUSH_DEVICE_ID, 0).takeIf { it > 0 }
+
+    override fun savePushDeviceID(id: Int) {
+        preferences.edit().putInt(KEY_PUSH_DEVICE_ID, id).apply()
+    }
+
+    override fun clearPushDeviceID() {
+        preferences.edit().remove(KEY_PUSH_DEVICE_ID).apply()
+    }
+
     private companion object {
         const val KEY_TOKEN = "jwt"
         const val KEY_EMAIL = "email"
+        const val KEY_PUSH_DEVICE_ID = "push_device_id"
     }
 }
