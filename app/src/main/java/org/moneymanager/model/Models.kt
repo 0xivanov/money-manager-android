@@ -18,6 +18,10 @@ data class Transaction(
     val amount: String,
     val currency: String,
     val occurredAt: String,
+    val source: String = "manual",
+    val status: String = "posted",
+    val excludedFromBudget: Boolean = false,
+    val scheduleOccurrenceId: Int? = null,
 )
 
 data class TransactionRequest(
@@ -27,6 +31,7 @@ data class TransactionRequest(
     val amount: String,
     val currency: String = "EUR",
     val occurredAt: String,
+    val excludedFromBudget: Boolean = false,
 )
 
 data class Category(

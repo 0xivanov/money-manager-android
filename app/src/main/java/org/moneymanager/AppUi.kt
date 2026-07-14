@@ -164,6 +164,14 @@ fun MoneyManagerRoot(
                 viewModel.clearExportResult()
             }
         }
+        LaunchedEffect(state.growth.investmentExportCsv, state.growth.investmentExportFileName) {
+            val csv = state.growth.investmentExportCsv
+            val fileName = state.growth.investmentExportFileName
+            if (csv != null && fileName != null) {
+                onExportCsv(fileName, csv)
+                viewModel.clearInvestmentExport()
+            }
+        }
 
         Surface(
             modifier = Modifier
@@ -390,7 +398,9 @@ private fun MoneyApp(
     Scaffold(
         containerColor = appBackground,
         bottomBar = {
-            if (!state.isTransactionFormOpen) BottomNav(state = state, viewModel = viewModel)
+            if (!state.isTransactionFormOpen && state.growthDestination == null) {
+                BottomNav(state = state, viewModel = viewModel)
+            }
         },
     ) { padding ->
         Box(
@@ -400,9 +410,16 @@ private fun MoneyApp(
         ) {
             when {
                 state.isTransactionFormOpen -> TransactionEditor(state, viewModel)
+                state.growthDestination != null -> GrowthDestinationScreen(
+                    destination = state.growthDestination,
+                    state = state,
+                    viewModel = viewModel,
+                    notificationsEnabled = notificationsEnabled,
+                    onEnableNotifications = onEnableNotifications,
+                )
                 state.selectedTab == AppTab.Dashboard -> DashboardScreen(state, viewModel)
                 state.selectedTab == AppTab.Transactions -> TransactionsScreen(state, viewModel)
-                state.selectedTab == AppTab.Investments -> InvestmentScreen()
+                state.selectedTab == AppTab.Investments -> GrowthInvestmentScreen(state, viewModel)
                 else -> ProfileScreen(
                     state = state,
                     viewModel = viewModel,
@@ -927,6 +944,30 @@ private fun ProfileScreen(
                         Icon(Icons.Filled.Refresh, contentDescription = "Check connection")
                     }
                 }
+            }
+        }
+        item {
+            ProfileGroup(title = "Plan", modifier = Modifier.padding(horizontal = 16.dp)) {
+                ProfileAction(
+                    icon = Icons.Filled.CalendarMonth,
+                    title = "Scheduled money",
+                    subtitle = "Recurring income and expenses",
+                    onClick = { viewModel.openGrowthDestination(GrowthDestination.Schedules) },
+                )
+                HorizontalDivider(color = softDivider)
+                ProfileAction(
+                    icon = Icons.Filled.Insights,
+                    title = "Budgets",
+                    subtitle = "Weekly and monthly spending limits",
+                    onClick = { viewModel.openGrowthDestination(GrowthDestination.Budgets) },
+                )
+                HorizontalDivider(color = softDivider)
+                ProfileAction(
+                    icon = Icons.Filled.Notifications,
+                    title = "Notifications",
+                    subtitle = "Budget, spending, schedule, and investment alerts",
+                    onClick = { viewModel.openGrowthDestination(GrowthDestination.Notifications) },
+                )
             }
         }
         item {

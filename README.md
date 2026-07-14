@@ -127,11 +127,22 @@ Build with:
 
 Both the phone and computer must be on the same network. Your firewall must allow inbound traffic to port `8080`.
 
-## Notification Permission
+## Push Notifications
 
-The app requests notification permission on Android 13+ because it shows local notifications for simulated wallet purchase signals.
+The app requests notification permission on Android 13+. Remote money alerts use Firebase Cloud Messaging and remain disabled until a Firebase Android app is configured for package `org.moneymanager`.
 
-If you deny the permission, the `Simulate wallet signal` button will not show a notification. Re-enable permission from:
+Keep the Firebase client values outside the repository, for example in `~/.gradle/gradle.properties`:
+
+```properties
+moneyManagerFirebaseProjectId=your-project-id
+moneyManagerFirebaseApplicationId=1:PROJECT_NUMBER:android:APP_HASH
+moneyManagerFirebaseApiKey=your-android-api-key
+moneyManagerFirebaseSenderId=your-project-number
+```
+
+These four values come from the Firebase Android app configuration. They identify the client but do not authorize server access. The Firebase service-account key used to send messages belongs only in the backend deployer secret described in the server README.
+
+If you deny permission, re-enable it from:
 
 ```text
 Android Settings -> Apps -> Money Manager -> Notifications
@@ -180,12 +191,16 @@ Physical purchase detected
 
 - Register and login with email/password.
 - Store the JWT locally and delete it on logout.
-- Dashboard with monthly spending pie chart.
+- Dashboard with monthly spending, budgets, schedules, and transaction activity.
 - Tap pie slices to filter transactions by expense category.
 - Previous month navigation, with future months blocked.
 - Grouped daily transaction list.
 - Add, edit, and delete EUR transactions.
-- Local notification flow for simulated wallet purchase signals.
+- Daily, weekly, and monthly scheduled income and expenses.
+- Spending budgets and alert preferences.
+- BTC, ETH, and stock trade tracking with portfolio valuation, reminders, and audit CSV export.
+- Optional FCM registration for bank-spending, budget, schedule, and investment alerts.
+- Debug-only local notification flow for simulated wallet purchase signals.
 - Replaceable purchase signal abstraction for future BLE integration.
 
 ## Troubleshooting
