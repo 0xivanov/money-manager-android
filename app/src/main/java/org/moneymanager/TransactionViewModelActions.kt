@@ -92,7 +92,7 @@ internal class TransactionViewModelActions(
             val categories = if (value == "income") it.incomeCategories else it.expenseCategories
             it.copy(
                 formType = value,
-                formCategory = categories.firstOrNull()?.name ?: if (value == "income") "salary" else "food",
+                formCategory = categories.firstOrNull()?.name ?: if (value == "income") "salary" else "groceries",
                 formError = null,
             )
         }
@@ -203,7 +203,7 @@ internal class TransactionViewModelActions(
                     val categories = if (it.formType == "income") it.incomeCategories else it.expenseCategories
                     it.copy(
                         formCategory = if (it.formCategory == category.name) {
-                            categories.firstOrNull()?.name ?: if (it.formType == "income") "salary" else "food"
+                            categories.firstOrNull()?.name ?: if (it.formType == "income") "salary" else "groceries"
                         } else {
                             it.formCategory
                         },
@@ -224,7 +224,7 @@ internal class TransactionViewModelActions(
 
     fun openNewTransactionForm() {
         val current = state()
-        val category = current.expenseCategories.firstOrNull()?.name ?: "food"
+        val category = current.expenseCategories.firstOrNull()?.name ?: "groceries"
         val currency = current.summary?.takeIf { current.hasMonthContent }?.currency ?: "EUR"
         val date = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
         val baseline = formFingerprint("expense", category, "", currency, "", date)

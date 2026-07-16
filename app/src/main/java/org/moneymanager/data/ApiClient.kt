@@ -12,6 +12,7 @@ import org.moneymanager.model.BudgetRequest
 import org.moneymanager.model.Category
 import org.moneymanager.model.ImportResult
 import org.moneymanager.model.InvestmentPortfolio
+import org.moneymanager.model.InvestmentPortfolioHistory
 import org.moneymanager.model.InvestmentPosition
 import org.moneymanager.model.InvestmentPriceRequest
 import org.moneymanager.model.InvestmentSchedule
@@ -166,13 +167,35 @@ class ApiClient(private val baseUrl: String) : MoneyManagerApi, GrowthApi {
     }
 
     override fun getInvestmentPortfolio(token: String): InvestmentPortfolio =
-        parsePortfolio(JSONObject(request("GET", "/investments/portfolio", token)))
+        parsePortfolio(JSONObject(request("GET", "/investments/portfolio", token, readTimeoutMillis = 30_000)))
+
+    override fun getInvestmentPortfolioHistory(token: String, range: String): InvestmentPortfolioHistory =
+        parsePortfolioHistory(
+            JSONObject(
+                request(
+                    "GET",
+                    "/investments/portfolio/history?range=${range.queryEncoded()}",
+                    token,
+                    readTimeoutMillis = 30_000,
+                ),
+            ),
+        )
 
     override fun getInvestmentTrades(token: String): List<InvestmentTrade> =
         request("GET", "/investments/trades", token = token).jsonArray(::parseTrade)
 
     override fun createInvestmentTrade(token: String, trade: InvestmentTradeRequest): InvestmentTrade =
-        parseTrade(JSONObject(request("POST", "/investments/trades", token, trade.toJson().toString())))
+        parseTrade(
+            JSONObject(
+                request(
+                    "POST",
+                    "/investments/trades",
+                    token,
+                    trade.toJson().toString(),
+                    readTimeoutMillis = 30_000,
+                ),
+            ),
+        )
 
     override fun deleteInvestmentTrade(token: String, id: Int) {
         request("DELETE", "/investments/trades/$id", token)
@@ -185,7 +208,7 @@ class ApiClient(private val baseUrl: String) : MoneyManagerApi, GrowthApi {
     override fun exportInvestmentsCsv(token: String, from: String, to: String): String =
         request(
             "GET",
-            "/investments/export?from=${from.queryEncoded()}&to=${to.queryEncoded()}",
+            "/investments/export?from=${from.queryEncoded()}&through=${to.queryEncoded()}",
             token,
         )
 
@@ -228,12 +251,13 @@ class ApiClient(private val baseUrl: String) : MoneyManagerApi, GrowthApi {
         path: String,
         token: String? = null,
         body: String? = null,
+        readTimeoutMillis: Int = 10_000,
     ): String {
         val connection = (URL(baseUrl.trimEnd('/') + path).openConnection() as HttpURLConnection)
         try {
             connection.requestMethod = method
             connection.connectTimeout = 10_000
-            connection.readTimeout = 10_000
+            connection.readTimeout = readTimeoutMillis
             connection.setRequestProperty("Accept", "application/json")
             if (token != null) {
                 connection.setRequestProperty("Authorization", "Bearer $token")

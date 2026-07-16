@@ -9,6 +9,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Flight
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.LocalBar
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Person
@@ -16,6 +17,7 @@ import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.ShoppingBag
+import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Work
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -143,7 +145,9 @@ fun amountColor(amount: BigDecimal): Color =
 
 fun categoryColor(category: String): Color =
     when (category.lowercase()) {
-        "food" -> Color(0xFFFF6B7A)
+        "groceries" -> Color(0xFFFF6B7A)
+        "dining_out" -> Color(0xFFEC933C)
+        "going_out" -> Color(0xFFAB63BE)
         "transport" -> Color(0xFF27BDB2)
         "housing" -> Color(0xFF35A9C8)
         "utilities" -> Color(0xFFFF9469)
@@ -161,11 +165,17 @@ fun categoryColor(category: String): Color =
     }
 
 fun categoryTitle(category: String): String =
-    category.replaceFirstChar { it.uppercase() }
+    category
+        .replace('_', ' ')
+        .split(' ')
+        .filter(String::isNotBlank)
+        .joinToString(" ") { word -> word.replaceFirstChar { it.uppercase() } }
 
 fun categoryIcon(category: String): ImageVector =
     when (category.lowercase()) {
-        "food" -> Icons.Filled.Restaurant
+        "groceries" -> Icons.Filled.ShoppingCart
+        "dining_out" -> Icons.Filled.Restaurant
+        "going_out" -> Icons.Filled.LocalBar
         "transport" -> Icons.Filled.DirectionsCar
         "housing" -> Icons.Filled.Home
         "utilities" -> Icons.Filled.FlashOn

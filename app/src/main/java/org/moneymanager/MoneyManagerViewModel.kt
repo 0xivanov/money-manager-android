@@ -59,6 +59,8 @@ class MoneyManagerViewModel(
         MoneyManagerUiState(
             token = tokenStore.getToken(),
             signedInEmail = tokenStore.getEmail(),
+            hidePortfolioBalances = tokenStore.getHidePortfolioBalances(),
+            appearance = AppAppearance.fromStorage(tokenStore.getAppearanceMode()),
         ),
     )
     val state: StateFlow<MoneyManagerUiState> = _state.asStateFlow()
@@ -94,6 +96,7 @@ class MoneyManagerViewModel(
         if (_state.value.token != null) {
             loadCategories()
             loadMonth(_state.value.month)
+            growthActions.refreshInvestments()
         }
     }
 
@@ -139,12 +142,15 @@ class MoneyManagerViewModel(
                     MoneyManagerUiState(
                         token = result.token,
                         signedInEmail = result.user.email,
+                        hidePortfolioBalances = it.hidePortfolioBalances,
+                        appearance = it.appearance,
                         connectionStatus = it.connectionStatus,
                         connectionMessage = it.connectionMessage,
                     )
                 }
                 loadCategories()
                 loadMonth(state.value.month)
+                growthActions.refreshInvestments()
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
                 _state.update { it.copy(authError = userMessage(error)) }
@@ -186,6 +192,16 @@ class MoneyManagerViewModel(
         if (tab == AppTab.Investments) growthActions.refreshInvestments()
     }
 
+    fun setHidePortfolioBalances(hidden: Boolean) {
+        tokenStore.saveHidePortfolioBalances(hidden)
+        _state.update { it.copy(hidePortfolioBalances = hidden) }
+    }
+
+    fun setAppearance(appearance: AppAppearance) {
+        tokenStore.saveAppearanceMode(appearance.storageValue)
+        _state.update { it.copy(appearance = appearance) }
+    }
+
     fun openGrowthDestination(destination: GrowthDestination) = growthActions.openDestination(destination)
 
     fun closeGrowthDestination() = growthActions.closeDestination()
@@ -193,6 +209,8 @@ class MoneyManagerViewModel(
     fun refreshPlanning() = growthActions.refreshPlanning()
 
     fun refreshInvestments() = growthActions.refreshInvestments()
+
+    fun setInvestmentHistoryRange(range: String) = growthActions.setInvestmentHistoryRange(range)
 
     fun createSchedule(request: TransactionScheduleRequest) = growthActions.createSchedule(request)
 
@@ -241,7 +259,10 @@ class MoneyManagerViewModel(
         if (state.value.canGoNextMonth) moveMonth(1)
     }
 
-    fun refresh() = loadMonth(state.value.month, forceRefresh = true)
+    fun refresh() {
+        loadMonth(state.value.month, forceRefresh = true)
+        growthActions.refreshInvestments()
+    }
 
     fun selectExpenseCategory(category: String) = transactionActions.selectExpenseCategory(category)
 
@@ -450,7 +471,7 @@ class MoneyManagerViewModel(
                 incomeCategories = income,
                 formCategory = when {
                     it.formCategory.isNotBlank() -> it.formCategory
-                    else -> expenses.firstOrNull()?.name ?: "food"
+                    else -> expenses.firstOrNull()?.name ?: "groceries"
                 },
             )
         }
@@ -480,8 +501,12 @@ class MoneyManagerViewModel(
         tokenStore.clearToken()
         val connectionStatus = state.value.connectionStatus
         val connectionMessage = state.value.connectionMessage
+        val hidePortfolioBalances = state.value.hidePortfolioBalances
+        val appearance = state.value.appearance
         _state.value = MoneyManagerUiState(
             authError = message,
+            hidePortfolioBalances = hidePortfolioBalances,
+            appearance = appearance,
             connectionStatus = connectionStatus,
             connectionMessage = connectionMessage,
         )

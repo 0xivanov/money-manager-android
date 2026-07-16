@@ -315,29 +315,68 @@ internal fun SimpleHeader(
 internal fun BalanceCard(state: MoneyManagerUiState, modifier: Modifier = Modifier) {
     val summary = state.summary ?: return
     val balance = BigDecimal(summary.balance)
+    val investmentCashFlow = state.monthlyInvestmentCashFlow
+    val investmentAmount = investmentCashFlow.abs().money(summary.currency)
+    val investmentsPending = state.growth.isInvestmentsLoading && state.growth.trades.isEmpty()
+    val investmentsUnavailable = state.growth.error != null && state.growth.trades.isEmpty()
+    val investmentDetail = when {
+        investmentsPending -> "Loading investment activity"
+        investmentsUnavailable -> "Investment activity unavailable"
+        investmentCashFlow < BigDecimal.ZERO -> "$investmentAmount returned this month"
+        else -> "$investmentAmount invested this month"
+    }
+    val afterInvestmentsValue = if (investmentsPending || investmentsUnavailable) {
+        "—"
+    } else {
+        state.balanceAfterInvestments.money(summary.currency)
+    }
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = cardShape,
-        color = financeGreen,
+        color = softGreenCard,
     ) {
-        Row(
-            Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Column(
+            Modifier.padding(horizontal = 20.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Column(Modifier.weight(1f)) {
-                Text("Monthly balance", color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.78f))
-                Text(
-                    balance.money(summary.currency),
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
             Text(
-                if (balance >= BigDecimal.ZERO) "On track" else "Overdrawn",
-                color = MaterialTheme.colorScheme.onPrimary,
+                "Monthly balance",
+                color = financeGreen,
                 fontWeight = FontWeight.SemiBold,
             )
+            Text(
+                balance.money(summary.currency),
+                style = MaterialTheme.typography.headlineLarge,
+                color = nearBlack,
+                fontWeight = FontWeight.Bold,
+            )
+            Text("Income minus expenses", color = mutedText, style = MaterialTheme.typography.bodySmall)
+            HorizontalDivider(
+                modifier = Modifier.padding(vertical = 4.dp),
+                color = softDivider,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("After investments", color = nearBlack, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (state.hidePortfolioBalances) "Investment amount hidden" else investmentDetail,
+                        color = mutedText,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Text(
+                    if (state.hidePortfolioBalances) "••••••" else afterInvestmentsValue,
+                    color = mutedText,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.semantics {
+                        contentDescription = if (state.hidePortfolioBalances) {
+                            "Balance after investments hidden"
+                        } else {
+                            "Balance after investments $afterInvestmentsValue"
+                        }
+                    },
+                )
+            }
         }
     }
 }

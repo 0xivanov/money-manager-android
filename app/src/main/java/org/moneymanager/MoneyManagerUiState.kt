@@ -30,6 +30,7 @@ import org.moneymanager.model.Budget
 import org.moneymanager.model.BudgetRequest
 import org.moneymanager.model.Category
 import org.moneymanager.model.InvestmentPortfolio
+import org.moneymanager.model.InvestmentPortfolioHistory
 import org.moneymanager.model.InvestmentPriceRequest
 import org.moneymanager.model.InvestmentSchedule
 import org.moneymanager.model.InvestmentScheduleRequest
@@ -83,6 +84,8 @@ enum class GrowthDestination {
     Schedules,
     Budgets,
     Notifications,
+    InvestmentTrades,
+    InvestmentHistory,
 }
 
 data class GrowthUiState(
@@ -90,12 +93,16 @@ data class GrowthUiState(
     val budgets: List<Budget> = emptyList(),
     val notificationPreferences: NotificationPreferences? = null,
     val portfolio: InvestmentPortfolio? = null,
+    val portfolioHistory: InvestmentPortfolioHistory? = null,
+    val historyRange: String = "1y",
     val trades: List<InvestmentTrade> = emptyList(),
     val investmentSchedules: List<InvestmentSchedule> = emptyList(),
     val isPlanningLoading: Boolean = false,
     val isInvestmentsLoading: Boolean = false,
+    val isInvestmentHistoryLoading: Boolean = false,
     val isMutating: Boolean = false,
     val error: String? = null,
+    val investmentHistoryError: String? = null,
     val investmentExportCsv: String? = null,
     val investmentExportFileName: String? = null,
 )
@@ -104,6 +111,8 @@ data class MoneyManagerUiState(
     val token: String? = null,
     val email: String = "",
     val signedInEmail: String = "",
+    val hidePortfolioBalances: Boolean = true,
+    val appearance: AppAppearance = AppAppearance.System,
     val password: String = "",
     val confirmPassword: String = "",
     val selectedTab: AppTab = AppTab.Dashboard,
@@ -123,7 +132,7 @@ data class MoneyManagerUiState(
     val isTransactionFormOpen: Boolean = false,
     val editingId: Int? = null,
     val formType: String = "expense",
-    val formCategory: String = "food",
+    val formCategory: String = "groceries",
     val formAmount: String = "",
     val formCurrency: String = "EUR",
     val formDescription: String = "",
@@ -165,6 +174,29 @@ data class MoneyManagerUiState(
 
     val currentCurrency: String
         get() = if (hasMonthContent) summary?.currency ?: formCurrency else formCurrency
+
+    val monthlyInvestmentCashFlow: BigDecimal
+        get() {
+            val summaryCurrency = summary?.currency ?: return BigDecimal.ZERO
+            return growth.trades
+                .asSequence()
+                .filter {
+                    it.currency.equals(summaryCurrency, ignoreCase = true) &&
+                        it.occurredAt.take(7) == month
+                }
+                .fold(BigDecimal.ZERO) { total, trade ->
+                    val amount = trade.amount.toMoney()
+                    val fees = trade.fees.toMoney()
+                    when (trade.side.lowercase()) {
+                        "buy" -> total + amount + fees
+                        "sell" -> total - amount + fees
+                        else -> total
+                    }
+                }
+        }
+
+    val balanceAfterInvestments: BigDecimal
+        get() = summary?.balance?.toMoney()?.minus(monthlyInvestmentCashFlow) ?: BigDecimal.ZERO
 
     val expenseCategoryTotals: List<CategoryTotal>
         get() = if (!hasMonthContent) {

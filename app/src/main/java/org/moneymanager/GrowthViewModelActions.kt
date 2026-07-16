@@ -3,9 +3,12 @@ package org.moneymanager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 import org.moneymanager.data.GrowthApi
 import org.moneymanager.data.SessionStore
@@ -29,9 +32,19 @@ internal class GrowthViewModelActions(
     private val handleSessionExpiry: (Exception, String) -> Boolean,
     private val sessionIsCurrent: (String) -> Boolean,
 ) {
+    private var investmentLoadJob: Job? = null
+    private var investmentHistoryJob: Job? = null
+
     fun openDestination(destination: GrowthDestination) {
         updateState { it.copy(growthDestination = destination, growth = it.growth.copy(error = null)) }
-        refreshPlanning()
+        when (destination) {
+            GrowthDestination.Schedules,
+            GrowthDestination.Budgets,
+            GrowthDestination.Notifications,
+            -> refreshPlanning()
+            GrowthDestination.InvestmentTrades -> refreshInvestments()
+            GrowthDestination.InvestmentHistory -> loadInvestmentHistory(state().growth.historyRange)
+        }
     }
 
     fun closeDestination() {
@@ -40,7 +53,23 @@ internal class GrowthViewModelActions(
 
     fun refreshPlanning() = loadPlanning()
 
-    fun refreshInvestments() = loadInvestments()
+    fun refreshInvestments() {
+        loadInvestments()
+        loadInvestmentHistory(state().growth.historyRange)
+    }
+
+    fun setInvestmentHistoryRange(range: String) {
+        val normalized = range.takeIf { it in setOf("1m", "3m", "1y") } ?: "1y"
+        updateState {
+            it.copy(
+                growth = it.growth.copy(
+                    historyRange = normalized,
+                    investmentHistoryError = null,
+                ),
+            )
+        }
+        loadInvestmentHistory(normalized)
+    }
 
     fun createSchedule(request: TransactionScheduleRequest) = mutate(refresh = ::loadPlanning) { service, token ->
         service.createSchedule(token, request)
@@ -116,16 +145,16 @@ internal class GrowthViewModelActions(
     }
 
     fun createInvestmentTrade(request: InvestmentTradeRequest) =
-        mutate(refresh = ::loadInvestments) { service, token ->
+        mutate(refresh = ::refreshInvestments) { service, token ->
             service.createInvestmentTrade(token, request)
         }
 
-    fun deleteInvestmentTrade(id: Int) = mutate(refresh = ::loadInvestments) { service, token ->
+    fun deleteInvestmentTrade(id: Int) = mutate(refresh = ::refreshInvestments) { service, token ->
         service.deleteInvestmentTrade(token, id)
     }
 
     fun setInvestmentPrice(request: InvestmentPriceRequest) =
-        mutate(refresh = ::loadInvestments) { service, token ->
+        mutate(refresh = ::refreshInvestments) { service, token ->
             service.setInvestmentPrice(token, request)
         }
 
@@ -226,26 +255,33 @@ internal class GrowthViewModelActions(
     private fun loadInvestments() {
         val token = state().token ?: return
         val service = api ?: return showUnavailable()
-        sessionScope().launch {
+        if (investmentLoadJob?.isActive == true) return
+        investmentLoadJob = sessionScope().launch {
             updateState { it.copy(growth = it.growth.copy(isInvestmentsLoading = true, error = null)) }
             try {
                 val result = withContext(ioDispatcher) {
-                    coroutineScope {
-                        val portfolio = async { service.getInvestmentPortfolio(token) }
-                        val trades = async { service.getInvestmentTrades(token) }
-                        val schedules = async { service.getInvestmentSchedules(token) }
+                    supervisorScope {
+                        val portfolio = async { investmentResult { service.getInvestmentPortfolio(token) } }
+                        val trades = async { investmentResult { service.getInvestmentTrades(token) } }
+                        val schedules = async { investmentResult { service.getInvestmentSchedules(token) } }
                         Triple(portfolio.await(), trades.await(), schedules.await())
                     }
                 }
                 if (!sessionIsCurrent(token)) return@launch
+                val error = listOfNotNull(
+                    result.first.exceptionOrNull(),
+                    result.second.exceptionOrNull(),
+                    result.third.exceptionOrNull(),
+                ).firstOrNull() as? Exception
+                if (error != null && handleSessionExpiry(error, token)) return@launch
                 updateState {
                     it.copy(
                         growth = it.growth.copy(
-                            portfolio = result.first,
-                            trades = result.second,
-                            investmentSchedules = result.third,
+                            portfolio = result.first.getOrNull() ?: it.growth.portfolio,
+                            trades = result.second.getOrNull() ?: it.growth.trades,
+                            investmentSchedules = result.third.getOrNull() ?: it.growth.investmentSchedules,
                             isInvestmentsLoading = false,
-                            error = null,
+                            error = error?.let(::userMessage),
                         ),
                     )
                 }
@@ -256,6 +292,67 @@ internal class GrowthViewModelActions(
                 if (sessionIsCurrent(token)) {
                     updateState { it.copy(growth = it.growth.copy(isInvestmentsLoading = false)) }
                 }
+                if (investmentLoadJob === currentCoroutineContext()[Job]) investmentLoadJob = null
+            }
+        }
+    }
+
+    private suspend fun <T> investmentResult(block: suspend () -> T): Result<T> = try {
+        Result.success(block())
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        Result.failure(error)
+    }
+
+    private fun loadInvestmentHistory(range: String) {
+        val token = state().token ?: return
+        val service = api ?: return showUnavailable()
+        if (investmentHistoryJob?.isActive == true && state().growth.historyRange == range) return
+        investmentHistoryJob?.cancel()
+        investmentHistoryJob = sessionScope().launch {
+            updateState {
+                it.copy(
+                    growth = it.growth.copy(
+                        isInvestmentHistoryLoading = true,
+                        investmentHistoryError = null,
+                    ),
+                )
+            }
+            try {
+                val history = withContext(ioDispatcher) {
+                    service.getInvestmentPortfolioHistory(token, range)
+                }
+                if (!sessionIsCurrent(token) || state().growth.historyRange != range) return@launch
+                updateState {
+                    it.copy(
+                        growth = it.growth.copy(
+                            portfolioHistory = history,
+                            historyRange = history.range,
+                            isInvestmentHistoryLoading = false,
+                            investmentHistoryError = null,
+                        ),
+                    )
+                }
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                if (!handleSessionExpiry(error, token) && sessionIsCurrent(token)) {
+                    updateState {
+                        it.copy(
+                            growth = it.growth.copy(
+                                isInvestmentHistoryLoading = false,
+                                investmentHistoryError = userMessage(error),
+                            ),
+                        )
+                    }
+                }
+            } finally {
+                if (sessionIsCurrent(token) && state().growth.historyRange == range) {
+                    updateState {
+                        it.copy(growth = it.growth.copy(isInvestmentHistoryLoading = false))
+                    }
+                }
+                if (investmentHistoryJob === currentCoroutineContext()[Job]) investmentHistoryJob = null
             }
         }
     }

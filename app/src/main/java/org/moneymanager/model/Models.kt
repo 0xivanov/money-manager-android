@@ -57,7 +57,9 @@ data class ImportResult(
 )
 
 val expenseCategories = listOf(
-    "food",
+    "groceries",
+    "dining_out",
+    "going_out",
     "transport",
     "housing",
     "utilities",
@@ -66,6 +68,7 @@ val expenseCategories = listOf(
     "shopping",
     "travel",
     "education",
+    "beauty",
     "other",
 )
 

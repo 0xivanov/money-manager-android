@@ -98,6 +98,8 @@ fun GrowthDestinationScreen(
             notificationsEnabled,
             onEnableNotifications,
         )
+        GrowthDestination.InvestmentTrades -> InvestmentTradesScreen(state, viewModel)
+        GrowthDestination.InvestmentHistory -> InvestmentHistoryScreen(state, viewModel)
     }
 }
 @OptIn(ExperimentalMaterial3Api::class)
@@ -237,7 +239,15 @@ internal fun ChoiceRow(options: List<String>, selected: String, onSelect: (Strin
             FilterChip(
                 selected = selected == option,
                 onClick = { onSelect(option) },
-                label = { Text(option.replaceFirstChar(Char::uppercase)) },
+                label = {
+                    Text(
+                        if (option in setOf("manual", "revolut_x", "trading212")) {
+                            option.brokerLabel()
+                        } else {
+                            option.replaceFirstChar(Char::uppercase)
+                        },
+                    )
+                },
             )
         }
     }

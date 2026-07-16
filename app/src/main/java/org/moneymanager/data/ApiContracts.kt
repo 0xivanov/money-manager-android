@@ -12,6 +12,7 @@ import org.moneymanager.model.BudgetRequest
 import org.moneymanager.model.Category
 import org.moneymanager.model.ImportResult
 import org.moneymanager.model.InvestmentPortfolio
+import org.moneymanager.model.InvestmentPortfolioHistory
 import org.moneymanager.model.InvestmentPosition
 import org.moneymanager.model.InvestmentPriceRequest
 import org.moneymanager.model.InvestmentSchedule
@@ -59,6 +60,7 @@ interface GrowthApi {
     fun registerPushDevice(token: String, deviceToken: String): Int
     fun deletePushDevice(token: String, id: Int)
     fun getInvestmentPortfolio(token: String): InvestmentPortfolio
+    fun getInvestmentPortfolioHistory(token: String, range: String = "1y"): InvestmentPortfolioHistory
     fun getInvestmentTrades(token: String): List<InvestmentTrade>
     fun createInvestmentTrade(token: String, trade: InvestmentTradeRequest): InvestmentTrade
     fun deleteInvestmentTrade(token: String, id: Int)

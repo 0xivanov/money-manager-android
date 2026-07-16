@@ -149,7 +149,7 @@ fun MoneyManagerRoot(
                 ?.let(viewModel::importRevolutCsv)
         }
     }
-    MoneyManagerTheme {
+    MoneyManagerTheme(appearance = state.appearance) {
         LaunchedEffect(state.token, pendingTrackPurchase) {
             if (state.token != null && pendingTrackPurchase) {
                 viewModel.openPhysicalPurchaseForm()

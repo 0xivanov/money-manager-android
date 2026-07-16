@@ -12,6 +12,8 @@ import org.moneymanager.model.BudgetRequest
 import org.moneymanager.model.Category
 import org.moneymanager.model.ImportResult
 import org.moneymanager.model.InvestmentPortfolio
+import org.moneymanager.model.InvestmentPortfolioHistory
+import org.moneymanager.model.InvestmentPortfolioHistoryPoint
 import org.moneymanager.model.InvestmentPosition
 import org.moneymanager.model.InvestmentPriceRequest
 import org.moneymanager.model.InvestmentSchedule
@@ -141,11 +143,14 @@ internal fun parseTrade(json: JSONObject): InvestmentTrade = InvestmentTrade(
     assetName = json.getString("asset_name"),
     broker = json.getString("broker"),
     side = json.getString("side"),
+    amount = json.getString("amount"),
     quantity = json.getString("quantity"),
     pricePerUnit = json.getString("price_per_unit"),
+    priceProvider = json.optNullableString("price_provider"),
+    priceAsOf = json.optNullableString("price_as_of"),
     fees = json.getString("fees"),
     currency = json.getString("currency"),
-    occurredAt = json.getString("occurred_at").dateOnly(),
+    occurredAt = json.getString("occurred_at"),
     notes = json.optString("notes"),
 )
 
@@ -155,8 +160,14 @@ internal fun InvestmentTradeRequest.toJson(): JSONObject = JSONObject()
     .put("asset_name", assetName.trim())
     .put("broker", broker)
     .put("side", side)
-    .put("quantity", quantity)
-    .put("price_per_unit", pricePerUnit)
+    .apply {
+        if (amount.isNotBlank()) {
+            put("amount", amount)
+        } else {
+            putOptional("quantity", quantity)
+            putOptional("price_per_unit", pricePerUnit)
+        }
+    }
     .put("fees", fees)
     .put("currency", currency)
     .put("occurred_at", occurredAt)
@@ -172,6 +183,24 @@ internal fun parsePortfolio(json: JSONObject): InvestmentPortfolio {
         realizedProfit = json.getString("realized_profit"),
         currency = json.getString("currency"),
         missingPrices = json.optInt("missing_prices"),
+        unsupportedPositions = json.optInt("unsupported_positions"),
+    )
+}
+
+internal fun parsePortfolioHistory(json: JSONObject): InvestmentPortfolioHistory {
+    val points = json.optJSONArray("points") ?: JSONArray()
+    return InvestmentPortfolioHistory(
+        points = List(points.length()) { index ->
+            val point = points.getJSONObject(index)
+            InvestmentPortfolioHistoryPoint(
+                asOf = point.getString("as_of"),
+                value = point.getString("value"),
+                investedAmount = point.getString("invested_amount"),
+            )
+        },
+        currency = json.getString("currency"),
+        range = json.getString("range"),
+        unsupportedPositions = json.optInt("unsupported_positions"),
     )
 }
 
@@ -190,6 +219,7 @@ internal fun parsePosition(json: JSONObject): InvestmentPosition = InvestmentPos
     realizedProfit = json.getString("realized_profit"),
     currency = json.getString("currency"),
     priceAsOf = json.optNullableString("price_as_of"),
+    priceProvider = json.optNullableString("price_provider"),
     priceStatus = json.getString("price_status"),
 )
 

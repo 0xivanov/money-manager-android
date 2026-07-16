@@ -81,7 +81,11 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -169,6 +173,67 @@ internal fun ProfileScreen(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
+                    }
+                }
+            }
+        }
+        item {
+            ProfileGroup(title = "Privacy", modifier = Modifier.padding(horizontal = 16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("Hide portfolio balances", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Mask investment values throughout the app",
+                            color = mutedText,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    Switch(
+                        checked = state.hidePortfolioBalances,
+                        onCheckedChange = viewModel::setHidePortfolioBalances,
+                        modifier = Modifier.semantics {
+                            contentDescription = "Hide portfolio balances"
+                            role = Role.Switch
+                        },
+                    )
+                }
+            }
+        }
+        item {
+            ProfileGroup(title = "Appearance", modifier = Modifier.padding(horizontal = 16.dp)) {
+                Text(
+                    "Choose how Money Manager looks on this device",
+                    color = mutedText,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    AppAppearance.entries.forEachIndexed { index, appearance ->
+                        val label = when (appearance) {
+                            AppAppearance.System -> "System"
+                            AppAppearance.Light -> "Light"
+                            AppAppearance.Dark -> "Dark"
+                        }
+                        SegmentedButton(
+                            selected = state.appearance == appearance,
+                            onClick = { viewModel.setAppearance(appearance) },
+                            shape = SegmentedButtonDefaults.itemShape(
+                                index = index,
+                                count = AppAppearance.entries.size,
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .semantics {
+                                    role = Role.RadioButton
+                                    selected = state.appearance == appearance
+                                    contentDescription = "$label appearance"
+                                },
+                        ) {
+                            Text(label)
+                        }
                     }
                 }
             }

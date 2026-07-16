@@ -8,6 +8,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.moneymanager.model.BudgetRequest
+import org.moneymanager.model.InvestmentTradeRequest
 import org.moneymanager.model.TransactionScheduleRequest
 
 class ApiClientTest {
@@ -67,6 +68,73 @@ class ApiClientTest {
         assertEquals(null, portfolio.currentValue)
         assertEquals(null, portfolio.positions.single().currentPrice)
         assertEquals("/investments/portfolio", server.takeRequest().path)
+    }
+
+    @Test
+    fun `portfolio history sends range and preserves unsupported positions`() {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{
+                    "points":[{"as_of":"2026-07-01T00:00:00Z","value":"1250.00","invested_amount":"1100.00"}],
+                    "currency":"EUR","range":"3m","unsupported_positions":2
+                }""".trimIndent(),
+            ),
+        )
+
+        val history = client.getInvestmentPortfolioHistory("token", "3m")
+
+        assertEquals("1250.00", history.points.single().value)
+        assertEquals(2, history.unsupportedPositions)
+        assertEquals("/investments/portfolio/history?range=3m", server.takeRequest().path)
+    }
+
+    @Test
+    fun `trade creation sends amount and parses market data audit fields`() {
+        server.enqueue(
+            MockResponse().setResponseCode(201).setBody(
+                """{
+                    "id":9,"asset_type":"crypto","symbol":"BTC","asset_name":"Bitcoin",
+                    "broker":"revolut_x","side":"buy","amount":"250.00","quantity":"0.004",
+                    "price_per_unit":"62500.00","price_provider":"kraken",
+                    "price_as_of":"2026-07-14T12:30:00Z","fees":"1.00","currency":"EUR",
+                    "occurred_at":"2026-07-14T12:30:00Z","notes":"Demo buy"
+                }""".trimIndent(),
+            ),
+        )
+
+        val trade = client.createInvestmentTrade(
+            "token",
+            InvestmentTradeRequest(
+                assetType = "crypto",
+                symbol = "BTC",
+                assetName = "Bitcoin",
+                broker = "revolut_x",
+                side = "buy",
+                amount = "250.00",
+                fees = "1.00",
+                occurredAt = "2026-07-14T12:30:00Z",
+                notes = "Demo buy",
+            ),
+        )
+
+        val request = server.takeRequest()
+        val body = request.body.readUtf8()
+        assertTrue(body.contains("\"amount\":\"250.00\""))
+        assertTrue(!body.contains("price_per_unit"))
+        assertEquals("kraken", trade.priceProvider)
+        assertEquals("2026-07-14T12:30:00Z", trade.occurredAt)
+    }
+
+    @Test
+    fun `investment export uses backend through parameter`() {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("occurred_at,amount\n"))
+
+        client.exportInvestmentsCsv("token", "2026-07-01", "2026-07-31")
+
+        assertEquals(
+            "/investments/export?from=2026-07-01&through=2026-07-31",
+            server.takeRequest().path,
+        )
     }
 
     @Test

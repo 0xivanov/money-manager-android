@@ -14,6 +14,17 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
+enum class AppAppearance(val storageValue: String) {
+    System("system"),
+    Light("light"),
+    Dark("dark");
+
+    companion object {
+        fun fromStorage(value: String): AppAppearance =
+            entries.firstOrNull { it.storageValue == value } ?: System
+    }
+}
+
 val brandGreen = Color(0xFF064C39)
 
 @Immutable
@@ -71,13 +82,24 @@ private val darkAppColors = MoneyManagerColors(
 private val LocalMoneyManagerColors = staticCompositionLocalOf { lightAppColors }
 
 @Composable
-fun MoneyManagerTheme(content: @Composable () -> Unit) {
-    val isDark = isSystemInDarkTheme()
+fun MoneyManagerTheme(
+    appearance: AppAppearance = AppAppearance.System,
+    content: @Composable () -> Unit,
+) {
+    val isDark = when (appearance) {
+        AppAppearance.System -> isSystemInDarkTheme()
+        AppAppearance.Light -> false
+        AppAppearance.Dark -> true
+    }
     val colors = if (isDark) darkAppColors else lightAppColors
     val colorScheme = if (isDark) {
         darkColorScheme(
             primary = colors.primary,
             onPrimary = Color(0xFF052F20),
+            secondary = colors.primary,
+            onSecondary = Color(0xFF052F20),
+            secondaryContainer = colors.softCard,
+            onSecondaryContainer = colors.text,
             background = colors.background,
             onBackground = colors.text,
             surface = colors.surface,
@@ -91,6 +113,10 @@ fun MoneyManagerTheme(content: @Composable () -> Unit) {
         lightColorScheme(
             primary = colors.primary,
             onPrimary = Color.White,
+            secondary = colors.primary,
+            onSecondary = Color.White,
+            secondaryContainer = colors.softCard,
+            onSecondaryContainer = colors.text,
             background = colors.background,
             onBackground = colors.text,
             surface = colors.surface,

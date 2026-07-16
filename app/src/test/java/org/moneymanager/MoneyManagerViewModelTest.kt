@@ -1,5 +1,6 @@
 package org.moneymanager
 
+import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.YearMonth
 import kotlinx.coroutines.Dispatchers
@@ -21,6 +22,7 @@ import org.moneymanager.data.SessionStore
 import org.moneymanager.model.AuthResult
 import org.moneymanager.model.Category
 import org.moneymanager.model.ImportResult
+import org.moneymanager.model.InvestmentTrade
 import org.moneymanager.model.Transaction
 import org.moneymanager.model.TransactionRequest
 import org.moneymanager.model.TransactionSummary
@@ -179,11 +181,87 @@ class MoneyManagerViewModelTest {
 
         assertFalse(state.isFormValid)
     }
+
+    @Test
+    fun `portfolio privacy defaults hidden and persists through session store`() = runTest(dispatcher) {
+        val store = FakeSessionStore()
+        val viewModel = MoneyManagerViewModel(FakeApi(), store, dispatcher)
+
+        assertTrue(viewModel.state.value.hidePortfolioBalances)
+
+        viewModel.setHidePortfolioBalances(false)
+
+        assertFalse(viewModel.state.value.hidePortfolioBalances)
+        assertFalse(store.getHidePortfolioBalances())
+        val restoredViewModel = MoneyManagerViewModel(FakeApi(), store, dispatcher)
+        assertFalse(restoredViewModel.state.value.hidePortfolioBalances)
+    }
+
+    @Test
+    fun `appearance persists through session store`() = runTest(dispatcher) {
+        val store = FakeSessionStore()
+        val viewModel = MoneyManagerViewModel(FakeApi(), store, dispatcher)
+
+        assertEquals(AppAppearance.System, viewModel.state.value.appearance)
+
+        viewModel.setAppearance(AppAppearance.Dark)
+
+        assertEquals(AppAppearance.Dark, viewModel.state.value.appearance)
+        assertEquals("dark", store.getAppearanceMode())
+        val restoredViewModel = MoneyManagerViewModel(FakeApi(), store, dispatcher)
+        assertEquals(AppAppearance.Dark, restoredViewModel.state.value.appearance)
+    }
+
+    @Test
+    fun `monthly investment cash flow includes buy and sell fees and adjusts balance`() {
+        val state = MoneyManagerUiState(
+            month = "2026-07",
+            summary = TransactionSummary("2026-07", "1000.00", "500.00", "500.00", "EUR", 0),
+            growth = GrowthUiState(
+                trades = listOf(
+                    investmentTrade(id = 1, side = "buy", amount = "100.00", fees = "2.00"),
+                    investmentTrade(id = 2, side = "sell", amount = "40.00", fees = "1.00"),
+                    investmentTrade(id = 3, side = "buy", amount = "999.00", fees = "1.00", occurredAt = "2026-06-30T12:00:00Z"),
+                    investmentTrade(id = 4, side = "buy", amount = "999.00", fees = "1.00", currency = "USD"),
+                ),
+            ),
+        )
+
+        assertEquals(BigDecimal("63.00"), state.monthlyInvestmentCashFlow)
+        assertEquals(BigDecimal("437.00"), state.balanceAfterInvestments)
+    }
 }
+
+private fun investmentTrade(
+    id: Int,
+    side: String,
+    amount: String,
+    fees: String,
+    currency: String = "EUR",
+    occurredAt: String = "2026-07-15T12:00:00Z",
+): InvestmentTrade = InvestmentTrade(
+    id = id,
+    assetType = "crypto",
+    symbol = "BTC",
+    assetName = "Bitcoin",
+    broker = "revolut_x",
+    side = side,
+    amount = amount,
+    quantity = "0.001",
+    pricePerUnit = "60000.00",
+    priceProvider = "kraken",
+    priceAsOf = occurredAt,
+    fees = fees,
+    currency = currency,
+    occurredAt = occurredAt,
+    notes = "",
+)
 
 private class FakeSessionStore(
     private var token: String? = null,
     private var email: String = "",
+    private var hidePortfolioBalances: Boolean = true,
+    private var appearanceMode: String = "system",
 ) : SessionStore {
     private var pushDeviceID: Int? = null
     override fun getToken(): String? = token
@@ -199,6 +277,14 @@ private class FakeSessionStore(
     override fun getPushDeviceID(): Int? = pushDeviceID
     override fun savePushDeviceID(id: Int) { pushDeviceID = id }
     override fun clearPushDeviceID() { pushDeviceID = null }
+    override fun getHidePortfolioBalances(): Boolean = hidePortfolioBalances
+    override fun saveHidePortfolioBalances(hidden: Boolean) {
+        hidePortfolioBalances = hidden
+    }
+    override fun getAppearanceMode(): String = appearanceMode
+    override fun saveAppearanceMode(mode: String) {
+        appearanceMode = mode
+    }
 }
 
 private class FakeApi(
@@ -228,11 +314,11 @@ private class FakeApi(
     ): List<Transaction> {
         transactionRequests[month] = transactionRequests.getOrDefault(month, 0) + 1
         return listOf(
-            Transaction(1, "expense", "food", "Lunch", "125.00", "EUR", YearMonth.parse(month).atDay(1).toString()),
+            Transaction(1, "expense", "dining_out", "Lunch", "125.00", "EUR", YearMonth.parse(month).atDay(1).toString()),
         )
     }
     override fun getCategories(token: String, type: String): List<Category> = listOf(
-        Category(if (type == "expense") 1 else 2, type, if (type == "expense") "food" else "salary", true),
+        Category(if (type == "expense") 1 else 2, type, if (type == "expense") "groceries" else "salary", true),
     )
     override fun createCategory(token: String, type: String, name: String): Category =
         Category(3, type, name, false)

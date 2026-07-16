@@ -80,8 +80,11 @@ data class InvestmentTrade(
     val assetName: String,
     val broker: String,
     val side: String,
+    val amount: String,
     val quantity: String,
     val pricePerUnit: String,
+    val priceProvider: String?,
+    val priceAsOf: String?,
     val fees: String,
     val currency: String,
     val occurredAt: String,
@@ -94,8 +97,9 @@ data class InvestmentTradeRequest(
     val assetName: String,
     val broker: String,
     val side: String,
-    val quantity: String,
-    val pricePerUnit: String,
+    val amount: String = "",
+    val quantity: String? = null,
+    val pricePerUnit: String? = null,
     val fees: String = "0",
     val currency: String = "EUR",
     val occurredAt: String,
@@ -117,6 +121,7 @@ data class InvestmentPosition(
     val realizedProfit: String,
     val currency: String,
     val priceAsOf: String?,
+    val priceProvider: String?,
     val priceStatus: String,
 )
 
@@ -128,6 +133,20 @@ data class InvestmentPortfolio(
     val realizedProfit: String,
     val currency: String,
     val missingPrices: Int,
+    val unsupportedPositions: Int,
+)
+
+data class InvestmentPortfolioHistoryPoint(
+    val asOf: String,
+    val value: String,
+    val investedAmount: String,
+)
+
+data class InvestmentPortfolioHistory(
+    val points: List<InvestmentPortfolioHistoryPoint>,
+    val currency: String,
+    val range: String,
+    val unsupportedPositions: Int,
 )
 
 data class InvestmentPriceRequest(

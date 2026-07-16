@@ -182,7 +182,7 @@ private fun BudgetEditor(
     GrowthSheet("New budget", onDismiss) {
         GrowthField(name, { name = it }, "Name", "Monthly spending")
         GrowthField(amount, { amount = it }, "Limit", "1200")
-        GrowthField(category, { category = it.lowercase().trim() }, "Category (optional)", "food")
+        GrowthField(category, { category = it.lowercase().trim() }, "Category (optional)", "groceries")
         ChoiceRow(listOf("weekly", "monthly"), period) { period = it }
         GrowthField(threshold, { threshold = it.filter(Char::isDigit).take(3) }, "Warn me at %", "80")
         Button(

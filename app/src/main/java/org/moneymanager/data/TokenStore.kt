@@ -12,6 +12,10 @@ interface SessionStore {
     fun getPushDeviceID(): Int?
     fun savePushDeviceID(id: Int)
     fun clearPushDeviceID()
+    fun getHidePortfolioBalances(): Boolean = true
+    fun saveHidePortfolioBalances(hidden: Boolean) = Unit
+    fun getAppearanceMode(): String = "system"
+    fun saveAppearanceMode(mode: String) = Unit
 }
 
 class TokenStore(context: Context) : SessionStore {
@@ -53,9 +57,25 @@ class TokenStore(context: Context) : SessionStore {
         preferences.edit().remove(KEY_PUSH_DEVICE_ID).apply()
     }
 
+    override fun getHidePortfolioBalances(): Boolean =
+        preferences.getBoolean(KEY_HIDE_PORTFOLIO_BALANCES, true)
+
+    override fun saveHidePortfolioBalances(hidden: Boolean) {
+        preferences.edit().putBoolean(KEY_HIDE_PORTFOLIO_BALANCES, hidden).apply()
+    }
+
+    override fun getAppearanceMode(): String =
+        preferences.getString(KEY_APPEARANCE_MODE, "system") ?: "system"
+
+    override fun saveAppearanceMode(mode: String) {
+        preferences.edit().putString(KEY_APPEARANCE_MODE, mode).apply()
+    }
+
     private companion object {
         const val KEY_TOKEN = "jwt"
         const val KEY_EMAIL = "email"
         const val KEY_PUSH_DEVICE_ID = "push_device_id"
+        const val KEY_HIDE_PORTFOLIO_BALANCES = "hide_portfolio_balances"
+        const val KEY_APPEARANCE_MODE = "appearance_mode"
     }
 }

@@ -13,9 +13,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.FileProvider
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.io.File
 import org.moneymanager.data.ApiClient
@@ -75,6 +78,15 @@ class MainActivity : ComponentActivity() {
                 factory = MoneyManagerViewModelFactory(apiClient, tokenStore),
             )
             val state by viewModel.state.collectAsState()
+            val systemDark = isSystemInDarkTheme()
+            val useDarkBars = state.appearance == AppAppearance.Dark ||
+                (state.appearance == AppAppearance.System && systemDark)
+            SideEffect {
+                WindowCompat.getInsetsController(window, window.decorView).apply {
+                    isAppearanceLightStatusBars = !useDarkBars
+                    isAppearanceLightNavigationBars = !useDarkBars
+                }
+            }
             LaunchedEffect(state.token, firebaseDeviceToken) {
                 if (state.token != null) firebaseDeviceToken?.let(viewModel::registerPushDevice)
             }

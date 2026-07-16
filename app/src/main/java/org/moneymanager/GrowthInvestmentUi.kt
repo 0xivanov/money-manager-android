@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Savings
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -51,6 +52,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -88,21 +90,23 @@ fun GrowthInvestmentScreen(state: MoneyManagerUiState, viewModel: MoneyManagerVi
     var pricePosition by remember { mutableStateOf<InvestmentPosition?>(null) }
     var deleteTrade by remember { mutableStateOf<InvestmentTrade?>(null) }
     val portfolio = state.growth.portfolio
-    LazyColumn(
+    PullToRefreshBox(
+        isRefreshing = state.growth.isInvestmentsLoading,
+        onRefresh = viewModel::refreshInvestments,
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("WEALTH", color = mutedText, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                     Text("Invest", color = nearBlack, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
                 }
-                IconButton(onClick = viewModel::refreshInvestments) {
-                    Icon(Icons.Filled.Refresh, contentDescription = "Refresh", tint = mutedText)
-                }
-                Surface(color = financeGreen, shape = CircleShape) {
+                Surface(color = financeGreen, shape = RoundedCornerShape(15.dp)) {
                     IconButton(onClick = { showTradeEditor = true }) {
                         Icon(Icons.Filled.Add, contentDescription = "Add trade", tint = MaterialTheme.colorScheme.onPrimary)
                     }
@@ -113,13 +117,28 @@ fun GrowthInvestmentScreen(state: MoneyManagerUiState, viewModel: MoneyManagerVi
         if (state.growth.isInvestmentsLoading && portfolio == null) {
             item { GrowthLoading() }
         } else if (portfolio != null) {
-            item { PortfolioCard(portfolio) }
+            item { PortfolioCard(portfolio, state.hidePortfolioBalances) }
+            item {
+                InvestmentHistoryCard(
+                    state = state,
+                    onExpand = { viewModel.openGrowthDestination(GrowthDestination.InvestmentHistory) },
+                )
+            }
             if (portfolio.positions.isEmpty()) {
                 item { GrowthEmptyCard("No investments yet", "Record a buy or sell to build your portfolio.", "Add trade") { showTradeEditor = true } }
             } else {
-                item { GrowthSectionTitle("Holdings") }
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        GrowthSectionTitle("Holdings", Modifier.weight(1f))
+                        Text("AVERAGE COST", color = mutedText, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    }
+                }
                 items(portfolio.positions, key = { "${it.assetType}-${it.symbol}-${it.broker}" }) { position ->
-                    PositionCard(position) { pricePosition = position }
+                    PositionCard(
+                        position = position,
+                        hidePortfolioBalances = state.hidePortfolioBalances,
+                        onSetPrice = if (position.hasAutomaticPricing()) null else ({ pricePosition = position }),
+                    )
                 }
             }
         }
@@ -136,26 +155,45 @@ fun GrowthInvestmentScreen(state: MoneyManagerUiState, viewModel: MoneyManagerVi
                 InvestmentPlanCard(schedule, viewModel)
             }
         }
-        item { GrowthSectionTitle("Recent activity") }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                GrowthSectionTitle("Recent activity", Modifier.weight(1f))
+                if (state.growth.trades.isNotEmpty()) {
+                    TextButton(onClick = { viewModel.openGrowthDestination(GrowthDestination.InvestmentTrades) }) {
+                        Text("View all")
+                    }
+                }
+            }
+        }
         if (state.growth.trades.isEmpty()) {
             item { Text("No trades recorded", color = mutedText) }
         } else {
             items(state.growth.trades.take(8), key = { "trade-${it.id}" }) { trade ->
-                TradeCard(trade) { deleteTrade = trade }
+                TradeCard(trade, state.hidePortfolioBalances) { deleteTrade = trade }
             }
         }
         item {
-            OutlinedButton(
-                onClick = {
-                    viewModel.exportInvestments(LocalDate.now().minusYears(20).toString(), LocalDate.now().toString())
-                },
-                enabled = !state.growth.isMutating,
-                modifier = Modifier.fillMaxWidth(),
-                shape = buttonShape,
+            Surface(
+                color = softGreenSurface,
+                shape = cardShape,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = !state.growth.isMutating) {
+                        viewModel.exportInvestments(LocalDate.now().minusYears(20).toString(), LocalDate.now().toString())
+                    },
             ) {
-                Icon(Icons.Filled.FileDownload, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Export investment audit CSV")
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(Icons.Filled.FileDownload, contentDescription = null, tint = financeGreen)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("Audit-ready history", fontWeight = FontWeight.Bold)
+                        Text("Export amounts, quantities, prices, fees, brokers, and notes as CSV.", color = mutedText, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Text("Export", color = financeGreen, fontWeight = FontWeight.Bold)
+                }
             }
         }
         item {
@@ -164,6 +202,7 @@ fun GrowthInvestmentScreen(state: MoneyManagerUiState, viewModel: MoneyManagerVi
                 "Manual tracking by design",
                 "Prices and trades remain under your control. Broker and exchange connections are not enabled yet.",
             )
+        }
         }
     }
     if (showTradeEditor) {
@@ -197,45 +236,64 @@ fun GrowthInvestmentScreen(state: MoneyManagerUiState, viewModel: MoneyManagerVi
 }
 
 @Composable
-private fun PortfolioCard(portfolio: org.moneymanager.model.InvestmentPortfolio) {
+private fun PortfolioCard(
+    portfolio: org.moneymanager.model.InvestmentPortfolio,
+    hidePortfolioBalances: Boolean,
+) {
+    val realizedProfit = BigDecimal(portfolio.realizedProfit)
     Surface(color = invertedSurface, shape = cardShape) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("PORTFOLIO VALUE", color = inverseText.copy(alpha = 0.65f), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-            Text(
-                portfolio.currentValue?.let { BigDecimal(it).money(portfolio.currency) } ?: "Price update needed",
+            PrivatePortfolioValue(
+                value = portfolio.currentValue?.let { BigDecimal(it).money(portfolio.currency) } ?: "Price update needed",
+                hidden = hidePortfolioBalances,
                 color = inverseText,
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
             )
-            Row {
-                PortfolioMetric("INVESTED", BigDecimal(portfolio.investedAmount).money(portfolio.currency), Modifier.weight(1f))
-                PortfolioMetric("REALIZED", BigDecimal(portfolio.realizedProfit).signedMoney(portfolio.currency), Modifier.weight(1f))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                PortfolioMetric("INVESTED", BigDecimal(portfolio.investedAmount).money(portfolio.currency), hidePortfolioBalances, inverseText, Modifier.weight(1f))
+                PortfolioMetric(
+                    "UNREALIZED",
+                    portfolio.unrealizedProfit?.let { BigDecimal(it).signedMoney(portfolio.currency) } ?: "—",
+                    hidePortfolioBalances,
+                    portfolio.unrealizedProfit?.let { amountColor(BigDecimal(it)) } ?: inverseText.copy(alpha = 0.62f),
+                    Modifier.weight(1f),
+                )
+                PortfolioMetric(
+                    "REALIZED",
+                    BigDecimal(portfolio.realizedProfit).signedMoney(portfolio.currency),
+                    hidePortfolioBalances,
+                    when {
+                        realizedProfit > BigDecimal.ZERO -> incomeColor
+                        realizedProfit < BigDecimal.ZERO -> expenseColor
+                        else -> inverseText.copy(alpha = 0.62f)
+                    },
+                    Modifier.weight(1f),
+                )
             }
+            InvestmentPriceFreshness(portfolio.positions, color = inverseText.copy(alpha = 0.62f))
             if (portfolio.missingPrices > 0) {
                 Text(
                     "${portfolio.missingPrices} holding${if (portfolio.missingPrices == 1) " needs" else "s need"} a current price. Totals are hidden until complete.",
                     color = cryptoColor,
                     style = MaterialTheme.typography.bodySmall,
                 )
-            } else {
-                portfolio.unrealizedProfit?.let {
-                    Text("Unrealized ${BigDecimal(it).signedMoney(portfolio.currency)}", color = incomeColor, fontWeight = FontWeight.SemiBold)
-                }
             }
         }
     }
 }
 
 @Composable
-private fun PortfolioMetric(label: String, value: String, modifier: Modifier = Modifier) {
+private fun PortfolioMetric(label: String, value: String, hidden: Boolean, color: Color, modifier: Modifier = Modifier) {
     Column(modifier) {
         Text(label, color = inverseText.copy(alpha = 0.55f), style = MaterialTheme.typography.labelSmall)
-        Text(value, color = inverseText, fontWeight = FontWeight.SemiBold)
+        PrivatePortfolioValue(value, hidden, color = color, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
     }
 }
 
 @Composable
-private fun PositionCard(position: InvestmentPosition, onSetPrice: () -> Unit) {
+private fun PositionCard(position: InvestmentPosition, hidePortfolioBalances: Boolean, onSetPrice: (() -> Unit)?) {
     GrowthCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             GrowthIcon(
@@ -245,18 +303,30 @@ private fun PositionCard(position: InvestmentPosition, onSetPrice: () -> Unit) {
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(position.assetName.ifBlank { position.symbol }, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${position.symbol} · ${position.quantity} · ${position.broker.brokerLabel()}", color = mutedText, style = MaterialTheme.typography.bodySmall)
+                PrivatePortfolioValue(
+                    value = "${position.symbol} · ${formatInvestmentQuantity(position.quantity)} · ${position.broker.brokerLabel()}",
+                    hidden = hidePortfolioBalances,
+                    hiddenAccessibilityLabel = "${position.symbol}, ${position.broker.brokerLabel()}, quantity hidden",
+                    color = mutedText,
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
             Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    position.currentValue?.let { BigDecimal(it).money(position.currency) } ?: "No price",
+                PrivatePortfolioValue(
+                    value = position.currentValue?.let { BigDecimal(it).money(position.currency) } ?: "Set price",
+                    hidden = hidePortfolioBalances,
                     fontWeight = FontWeight.Bold,
                 )
-                position.unrealizedPercent?.let { Text("${it}%", color = amountColor(BigDecimal(position.unrealizedProfit ?: "0")), style = MaterialTheme.typography.bodySmall) }
+                PrivatePortfolioValue(
+                    value = "Avg ${BigDecimal(position.averageCost).money(position.currency)}",
+                    hidden = hidePortfolioBalances,
+                    hiddenAccessibilityLabel = "Average cost hidden",
+                    color = mutedText,
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Avg ${BigDecimal(position.averageCost).money(position.currency)}", color = mutedText, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+        if (onSetPrice != null) {
             TextButton(onClick = onSetPrice) {
                 Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(17.dp))
                 Spacer(Modifier.width(5.dp))
@@ -265,6 +335,9 @@ private fun PositionCard(position: InvestmentPosition, onSetPrice: () -> Unit) {
         }
     }
 }
+
+private fun InvestmentPosition.hasAutomaticPricing(): Boolean =
+    assetType.equals("crypto", ignoreCase = true) && (symbol.equals("BTC", true) || symbol.equals("ETH", true))
 
 @Composable
 private fun InvestmentPlanCard(schedule: InvestmentSchedule, viewModel: MoneyManagerViewModel) {
@@ -299,7 +372,7 @@ private fun InvestmentPlanCard(schedule: InvestmentSchedule, viewModel: MoneyMan
 }
 
 @Composable
-private fun TradeCard(trade: InvestmentTrade, onDelete: () -> Unit) {
+private fun TradeCard(trade: InvestmentTrade, hidePortfolioBalances: Boolean, onDelete: () -> Unit) {
     GrowthCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -310,10 +383,26 @@ private fun TradeCard(trade: InvestmentTrade, onDelete: () -> Unit) {
                 modifier = Modifier.width(42.dp),
             )
             Column(Modifier.weight(1f)) {
-                Text("${trade.symbol} · ${trade.quantity}", fontWeight = FontWeight.SemiBold)
-                Text("${trade.occurredAt} · ${trade.broker.brokerLabel()}", color = mutedText, style = MaterialTheme.typography.bodySmall)
+                Text("${trade.side.replaceFirstChar(Char::uppercase)} ${trade.symbol}", fontWeight = FontWeight.SemiBold)
+                PrivatePortfolioValue(
+                    value = "${formatInvestmentQuantity(trade.quantity)} ${trade.symbol} @ ${BigDecimal(trade.pricePerUnit).money(trade.currency)}",
+                    hidden = hidePortfolioBalances,
+                    hiddenAccessibilityLabel = "Trade quantity and execution price hidden",
+                    color = mutedText,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    "${trade.occurredAt.take(10)} · ${trade.broker.brokerLabel()}",
+                    color = mutedText,
+                    style = MaterialTheme.typography.labelSmall,
+                )
             }
-            Text(BigDecimal(trade.pricePerUnit).money(trade.currency), fontWeight = FontWeight.SemiBold)
+            PrivatePortfolioValue(
+                value = BigDecimal(trade.amount).money(trade.currency),
+                hidden = hidePortfolioBalances,
+                hiddenAccessibilityLabel = "Trade amount hidden",
+                fontWeight = FontWeight.SemiBold,
+            )
             IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, contentDescription = "Delete trade", tint = expenseColor) }
         }
     }
@@ -322,47 +411,35 @@ private fun TradeCard(trade: InvestmentTrade, onDelete: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TradeEditor(isSaving: Boolean, onDismiss: () -> Unit, onSave: (InvestmentTradeRequest) -> Unit) {
-    var assetType by remember { mutableStateOf("crypto") }
     var symbol by remember { mutableStateOf("BTC") }
-    var name by remember { mutableStateOf("Bitcoin") }
     var broker by remember { mutableStateOf("revolut_x") }
     var side by remember { mutableStateOf("buy") }
-    var quantity by remember { mutableStateOf("") }
-    var price by remember { mutableStateOf("") }
+    var amount by remember { mutableStateOf("") }
     var fees by remember { mutableStateOf("0") }
     var date by remember { mutableStateOf(LocalDate.now().toString()) }
-    val q = parseLocalizedDecimal(quantity)
-    val p = parseLocalizedDecimal(price)
+    val parsedAmount = parseLocalizedDecimal(amount)
     val f = parseLocalizedDecimal(fees)
-    val valid = symbol.isNotBlank() && name.isNotBlank() && q != null && q > BigDecimal.ZERO && p != null && p > BigDecimal.ZERO && f != null && f >= BigDecimal.ZERO && runCatching { LocalDate.parse(date) }.isSuccess
+    val valid = parsedAmount != null && parsedAmount > BigDecimal.ZERO && f != null && f >= BigDecimal.ZERO &&
+        runCatching { LocalDate.parse(date) }.isSuccess
     GrowthSheet("Record trade", onDismiss) {
-        ChoiceRow(listOf("crypto", "stock"), assetType) {
-            assetType = it
-            if (it == "crypto") {
-                symbol = "BTC"; name = "Bitcoin"; broker = "revolut_x"
-            } else {
-                symbol = "AAPL"; name = "Apple"; broker = "trading212"
-            }
-        }
+        Text("Asset", color = mutedText, style = MaterialTheme.typography.labelMedium)
+        ChoiceRow(listOf("BTC", "ETH"), symbol) { symbol = it }
         ChoiceRow(listOf("buy", "sell"), side) { side = it }
-        GrowthField(symbol, { symbol = it.uppercase().take(12) }, "Symbol", "BTC")
-        GrowthField(name, { name = it }, "Asset name", "Bitcoin")
-        GrowthField(broker, { broker = it.lowercase().replace(' ', '_') }, "Broker", "revolut_x")
-        GrowthField(quantity, { quantity = it }, "Quantity", "0.01")
-        GrowthField(price, { price = it }, "Price per unit", "58000")
+        Text("Broker", color = mutedText, style = MaterialTheme.typography.labelMedium)
+        ChoiceRow(listOf("revolut_x", "manual"), broker) { broker = it }
+        GrowthField(amount, { amount = it }, "Amount in EUR", "100")
         GrowthField(fees, { fees = it }, "Fees", "0")
         GrowthField(date, { date = it.take(10) }, "Trade date", "YYYY-MM-DD")
         Button(
             onClick = {
                 onSave(
                     InvestmentTradeRequest(
-                        assetType = assetType,
+                        assetType = "crypto",
                         symbol = symbol,
-                        assetName = name,
+                        assetName = if (symbol == "BTC") "Bitcoin" else "Ethereum",
                         broker = broker,
                         side = side,
-                        quantity = q!!.stripTrailingZeros().toPlainString(),
-                        pricePerUnit = p!!.stripTrailingZeros().toPlainString(),
+                        amount = parsedAmount!!.stripTrailingZeros().toPlainString(),
                         fees = f!!.stripTrailingZeros().toPlainString(),
                         occurredAt = date,
                     ),
@@ -378,9 +455,7 @@ private fun TradeEditor(isSaving: Boolean, onDismiss: () -> Unit, onSave: (Inves
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun InvestmentPlanEditor(isSaving: Boolean, onDismiss: () -> Unit, onSave: (InvestmentScheduleRequest) -> Unit) {
-    var assetType by remember { mutableStateOf("crypto") }
     var symbol by remember { mutableStateOf("BTC") }
-    var name by remember { mutableStateOf("Bitcoin") }
     var broker by remember { mutableStateOf("revolut_x") }
     var amount by remember { mutableStateOf("") }
     var frequency by remember { mutableStateOf("monthly") }
@@ -388,17 +463,13 @@ private fun InvestmentPlanEditor(isSaving: Boolean, onDismiss: () -> Unit, onSav
     var startDate by remember { mutableStateOf(LocalDate.now().toString()) }
     val parsedAmount = parseLocalizedDecimal(amount)
     val parsedInterval = interval.toIntOrNull()
-    val valid = symbol.isNotBlank() && name.isNotBlank() && parsedAmount != null && parsedAmount > BigDecimal.ZERO &&
+    val valid = parsedAmount != null && parsedAmount > BigDecimal.ZERO &&
         parsedInterval != null && parsedInterval in 1..365 && runCatching { LocalDate.parse(startDate) }.isSuccess
     GrowthSheet("Investment reminder", onDismiss) {
-        ChoiceRow(listOf("crypto", "stock"), assetType) {
-            assetType = it
-            if (it == "crypto") { symbol = "BTC"; name = "Bitcoin"; broker = "revolut_x" }
-            else { symbol = "AAPL"; name = "Apple"; broker = "trading212" }
-        }
-        GrowthField(symbol, { symbol = it.uppercase().take(12) }, "Symbol", "BTC")
-        GrowthField(name, { name = it }, "Asset name", "Bitcoin")
-        GrowthField(broker, { broker = it.lowercase().replace(' ', '_') }, "Broker", "revolut_x")
+        Text("Asset", color = mutedText, style = MaterialTheme.typography.labelMedium)
+        ChoiceRow(listOf("BTC", "ETH"), symbol) { symbol = it }
+        Text("Broker", color = mutedText, style = MaterialTheme.typography.labelMedium)
+        ChoiceRow(listOf("revolut_x", "manual"), broker) { broker = it }
         GrowthField(amount, { amount = it }, "Planned amount", "100")
         ChoiceRow(listOf("daily", "weekly", "monthly"), frequency) { frequency = it }
         GrowthField(interval, { interval = it.filter(Char::isDigit).take(3) }, "Every", "1")
@@ -408,9 +479,9 @@ private fun InvestmentPlanEditor(isSaving: Boolean, onDismiss: () -> Unit, onSav
                 val date = LocalDate.parse(startDate)
                 onSave(
                     InvestmentScheduleRequest(
-                        assetType = assetType,
+                        assetType = "crypto",
                         symbol = symbol,
-                        assetName = name,
+                        assetName = if (symbol == "BTC") "Bitcoin" else "Ethereum",
                         broker = broker,
                         amount = parsedAmount!!.stripTrailingZeros().toPlainString(),
                         frequency = frequency,

@@ -33,9 +33,16 @@ class UiFormattersTest {
 
     @Test
     fun `donut center and outside do not select a category`() {
-        val totals = listOf(CategoryTotal("food", BigDecimal.TEN))
+        val totals = listOf(CategoryTotal("groceries", BigDecimal.TEN))
 
         assertNull(findPieCategoryForTap(Offset(50f, 50f), 100f, 100f, totals))
         assertNull(findPieCategoryForTap(Offset(120f, 50f), 100f, 100f, totals))
+    }
+
+    @Test
+    fun `category titles turn identifiers into readable labels`() {
+        assertEquals("Groceries", categoryTitle("groceries"))
+        assertEquals("Dining Out", categoryTitle("dining_out"))
+        assertEquals("Going Out", categoryTitle("going_out"))
     }
 }
