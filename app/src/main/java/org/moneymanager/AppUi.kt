@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -254,7 +255,9 @@ private fun MoneyApp(
 @Composable
 private fun BottomNav(state: MoneyManagerUiState, viewModel: MoneyManagerViewModel) {
     Surface(
-        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+        modifier = Modifier
+            .navigationBarsPadding()
+            .padding(horizontal = 14.dp, vertical = 8.dp),
         color = appSurface,
         shape = RoundedCornerShape(23.dp),
         shadowElevation = 10.dp,

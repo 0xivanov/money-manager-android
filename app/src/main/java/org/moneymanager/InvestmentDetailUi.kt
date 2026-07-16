@@ -413,34 +413,61 @@ private fun InvestmentHistoryChart(points: List<InvestmentPortfolioHistoryPoint>
                 drawLine(gridColor, Offset(0f, gridY), Offset(size.width, gridY), strokeWidth = 1.dp.toPx())
             }
 
-            val valuePath = Path()
-            val investedPath = Path()
-            plotted.forEachIndexed { index, (_, value, invested) ->
-                if (index == 0) {
-                    valuePath.moveTo(x(index), y(value))
-                    investedPath.moveTo(x(index), y(invested))
-                } else {
-                    valuePath.lineTo(x(index), y(value))
-                    investedPath.lineTo(x(index), y(invested))
+            if (plotted.size == 1) {
+                val (_, value, invested) = plotted.single()
+                val centerX = x(0)
+                drawCircle(
+                    color = investedColor,
+                    radius = 5.dp.toPx(),
+                    center = Offset(centerX, y(invested)),
+                    style = Stroke(width = 2.dp.toPx()),
+                )
+                drawCircle(
+                    color = lineColor.copy(alpha = 0.22f),
+                    radius = 8.dp.toPx(),
+                    center = Offset(centerX, y(value)),
+                )
+                drawCircle(
+                    color = lineColor,
+                    radius = 4.dp.toPx(),
+                    center = Offset(centerX, y(value)),
+                )
+            } else {
+                val valuePath = Path()
+                val investedPath = Path()
+                plotted.forEachIndexed { index, (_, value, invested) ->
+                    if (index == 0) {
+                        valuePath.moveTo(x(index), y(value))
+                        investedPath.moveTo(x(index), y(invested))
+                    } else {
+                        valuePath.lineTo(x(index), y(value))
+                        investedPath.lineTo(x(index), y(invested))
+                    }
                 }
+                val areaPath = Path().apply {
+                    addPath(valuePath)
+                    lineTo(x(plotted.lastIndex), size.height - bottomPadding)
+                    lineTo(x(0), size.height - bottomPadding)
+                    close()
+                }
+                drawPath(areaPath, Brush.verticalGradient(listOf(lineColor.copy(alpha = 0.28f), lineColor.copy(alpha = 0.02f))))
+                drawPath(valuePath, lineColor, style = Stroke(width = 2.5.dp.toPx()))
+                drawPath(
+                    investedPath,
+                    investedColor,
+                    style = Stroke(width = 1.5.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 4.dp.toPx()))),
+                )
             }
-            val areaPath = Path().apply {
-                addPath(valuePath)
-                lineTo(x(plotted.lastIndex), size.height - bottomPadding)
-                lineTo(x(0), size.height - bottomPadding)
-                close()
-            }
-            drawPath(areaPath, Brush.verticalGradient(listOf(lineColor.copy(alpha = 0.28f), lineColor.copy(alpha = 0.02f))))
-            drawPath(valuePath, lineColor, style = Stroke(width = 2.5.dp.toPx()))
-            drawPath(
-                investedPath,
-                investedColor,
-                style = Stroke(width = 1.5.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 4.dp.toPx()))),
-            )
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(historyAxisDate(plotted.first().first.asOf), color = mutedText, style = MaterialTheme.typography.labelSmall)
-            Text(historyAxisDate(plotted.last().first.asOf), color = mutedText, style = MaterialTheme.typography.labelSmall)
+        if (plotted.size == 1) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text(historyAxisDate(plotted.single().first.asOf), color = mutedText, style = MaterialTheme.typography.labelSmall)
+            }
+        } else {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(historyAxisDate(plotted.first().first.asOf), color = mutedText, style = MaterialTheme.typography.labelSmall)
+                Text(historyAxisDate(plotted.last().first.asOf), color = mutedText, style = MaterialTheme.typography.labelSmall)
+            }
         }
     }
 }
