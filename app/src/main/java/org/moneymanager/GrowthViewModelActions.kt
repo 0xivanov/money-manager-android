@@ -121,7 +121,7 @@ internal class GrowthViewModelActions(
                     selectedTab = AppTab.Profile,
                     growthDestination = GrowthDestination.Budgets,
                 )
-                "investment_reminder" -> current.copy(
+                "investment_reminder", "scheduled_investment_posted" -> current.copy(
                     selectedTab = AppTab.Investments,
                     growthDestination = null,
                 )
